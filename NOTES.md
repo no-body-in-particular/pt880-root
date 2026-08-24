@@ -371,7 +371,29 @@ everything patched here:
 localhost and persists in `/data/property`. Renaming the APKs additionally
 requires a writable `/system`, i.e. the `prctl` patch above.
 
-## 9. Status
+## 9. The tracker protocol
+
+Full write-up in [protocol/README.md](protocol/README.md), machine-readable
+inventory in `protocol/opcodes.json`. Summary of what it settles:
+
+- The watch speaks **Thinkrace IW** (`IWAP`/`IWBP`), not the widely-posted
+  `[3G*...]` SeTracker protocol. The `[3G*]` command set is present in the
+  binary only because `protocol_fzd` and `protocol_mqtt` are compiled in too.
+- Eight protocol implementations ship in one APK. The live one is
+  `protocol_beehome`, chosen by `persist.sys.protocol_no=1`.
+- Active protocol: 53 uplink + 53 downlink opcodes against 42 + 42 in the
+  public Thinkrace V2.10 spec, so **21 pairs are undocumented**. Semantics for
+  most of them were recovered from the dispatcher's own log strings.
+- A separate **SMS control plane** (`<password>#<command>#`) carries 34
+  commands, 11 documented. The undocumented 23 include remote microphone,
+  remote camera, arbitrary modem AT commands, and repointing the device at
+  another server.
+
+Two measurement traps are written up there because both produced confidently
+wrong answers first: counting the union of all eight protocols against one
+protocol's spec, and sizing odex quick opcodes as one code unit.
+
+## 10. Status
 
 Working:
 
