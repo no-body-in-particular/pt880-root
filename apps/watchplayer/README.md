@@ -112,8 +112,9 @@ If the buds are not advertising, they can still be paired by address:
 adb shell am start -n org.watchplayer/.PlayerActivity -e pair AA:BB:CC:DD:EE:FF
 ```
 
-The paired i35 is `aa:bb:cc:dd:ee:ff` (DevClass `0x240404` = Audio/Video →
-wearable headset).
+Substitute your own buds' address. An i35 reports DevClass `0x240404`
+(Audio/Video → wearable headset); the address appears in **Menu → Bluetooth**,
+or in `/data/misc/bluedroid/bt_config.xml` after a scan.
 
 ## Building
 

@@ -38,7 +38,10 @@ image.
 
 `firmware/stock/` holds the small, irreplaceable partitions. `system.img`
 (450 MB), `vendor.img` and the modem/DSP images are **not** committed — dump
-them yourself with `scripts/backup.sh`, which writes them alongside.
+them yourself with `scripts/backup.sh`, which writes them alongside. Nor is
+`miscdata.img`: it carries this unit's serial number in plaintext and a donor
+copy is wrong for any other device, so it is dumped per-device alongside
+`prodnv` and `l_fixnv1`.
 
 `apps/watchplayer/` is a Bluetooth music player for the watch: local files to
 A2DP headphones, driven by the two hardware buttons on a 240×240 screen with no
