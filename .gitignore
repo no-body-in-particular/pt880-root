@@ -1,0 +1,4 @@
+*.exe
+*.o
+firmware/mydevice/
+analysis/*.txt
