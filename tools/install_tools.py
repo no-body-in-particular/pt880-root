@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install sshfs, htop and their library closure into system_mod.img.
+"""Install sshfs, htop, nano and their library closure into system_mod.img.
 
 Everything here is Alpine armhf, built against musl, so each binary needs the
 musl loader rather than Android's. The loader cannot be reached via PT_INTERP
@@ -37,6 +37,7 @@ LIBS = [
 BINS = [
     ("sshfs", "x_sshfs/usr/bin/sshfs", True),
     ("htop", "x_htop/usr/bin/htop", True),
+    ("nano", "x_nano/usr/bin/nano", True),
     ("fusermount3", "x_fuse3/usr/bin/fusermount3", False),  # needs only musl
 ]
 
@@ -88,6 +89,13 @@ def main():
             # anyway, but set it so it behaves as upstream expects.
             ino, nb = put(fs, "/xbin", name, data, 0o104755)
             print("  %-22s %8d  ino=%-6d mode=4755" % (name, len(data), ino))
+
+    print()
+    print("=== /etc/nanorc ===")
+    nrc = os.path.join(A, 'x_nano', 'etc', 'nanorc')
+    if os.path.isfile(nrc):
+        i, _ = put(fs, '/etc', 'nanorc', open(nrc, 'rb').read(), 0o100644)
+        print('  /etc/nanorc %d bytes ino=%d' % (os.path.getsize(nrc), i))
 
     print()
     print("=== terminfo -> /etc/terminfo ===")

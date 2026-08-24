@@ -18,7 +18,7 @@ patch offset, and the dead ends worth not repeating.
 | adb over USB | working |
 | **root shell over adb** | **working** — uid 0 with a full capability set |
 | `/system` writable at runtime | working |
-| busybox / htop / dropbear / sshfs installed | working |
+| busybox / htop / nano / dropbear / sshfs installed | working |
 
 ## Layout
 
@@ -27,6 +27,7 @@ patch offset, and the dead ends worth not repeating.
     firmware/    byte-exact stock dumps of the bootchain (restore sources)
     scripts/     driver scripts (backup / build / flash / restore)
     analysis/    scratch space for disassembly work
+    system/      files as they exist on the device under /system
 
 `tools/` also holds the ext4 reader/writer (`ext4tool.py`, `ext4mod.py`) used
 to edit `system.img` offline, so no device-side remount is needed to build an

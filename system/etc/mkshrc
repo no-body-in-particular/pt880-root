@@ -1,0 +1,113 @@
+# Copyright (c) 2010, 2012, 2013
+#	Thorsten Glaser <tg@mirbsd.org>
+# This file is provided under the same terms as mksh.
+#-
+# Minimal /system/etc/mkshrc for Android
+#
+# Support: https://launchpad.net/mksh
+
+: ${TERM:=xterm-256color} ${HOME:=/data} ${MKSH:=/system/bin/sh} ${HOSTNAME:=$(getprop ro.product.device)}
+: ${SHELL:=$MKSH} ${USER:=$(typeset x=$(id); x=${x#*\(}; print -r -- ${x%%\)*})} ${HOSTNAME:=android}
+if (( USER_ID )); then PS1='$'; else PS1='#'; fi
+function precmd {
+	typeset e=$?
+
+	(( e )) && print -n "$e|"
+}
+PS1='$(precmd)$USER@$HOSTNAME:${PWD:-?} '"$PS1 "
+export HOME HOSTNAME MKSH SHELL TERM USER
+alias l='ls'
+alias la='l -a'
+alias ll='l -l'
+alias lo='l -a -l'
+
+function hd {
+	cat "$@" | command hd /proc/self/fd/0
+}
+
+function more {
+	local dummy line llen curlin=0
+
+	cat "$@" | while IFS= read -r line; do
+		llen=${%line}
+		(( llen == -1 )) && llen=${#line}
+		(( llen = llen ? (llen + COLUMNS - 1) / COLUMNS : 1 ))
+		if (( (curlin += llen) >= LINES )); then
+			print -n -- '\033[7m--more--\033[0m'
+			read -u1 dummy
+			[[ $dummy = [Qq]* ]] && return 0
+			curlin=$llen
+		fi
+		print -r -- "$line"
+	done
+}
+
+function setenv {
+	eval export "\"$1\""'="$2"'
+}
+
+for p in ~/.bin; do
+	[[ -d $p/. ]] || continue
+	[[ :$PATH: = *:$p:* ]] || PATH=$p:$PATH
+done
+
+unset p
+
+: place customisations above this line
+
+# ---- added by sl8521e-root ----
+# EVERYTHING below must be pure mksh builtins. The stock image has no printf,
+# no id, no coreutils at all - /system/xbin is only reachable once this file
+# has already been sourced, so any $(external) here fails at every shell start.
+export PATH=/system/xbin:$PATH
+: ${TERM:=xterm-256color}
+export TERM
+# xterm-256color, not vt100: vt100 has no colour and no ACS line-drawing, so
+# htop and every other ncurses TUI renders as monochrome soup. The entry is
+# installed at /system/etc/terminfo/x/xterm-256color. Only set if the caller
+# did not already export a TERM.
+# ncurses (htop) looks here for terminal definitions
+export TERMINFO=/system/etc/terminfo
+export TERMINFO_DIRS=/system/etc/terminfo
+# No global LD_LIBRARY_PATH here: the musl wrappers in /system/xbin already
+# pass --library-path, and exporting it would also be inherited by every
+# bionic binary the shell spawns.
+
+# The stock image has no head/awk/tr/less/find/... - route them to busybox.
+if [[ -x /system/xbin/busybox ]]; then
+	for _a in head tail awk sed tr find less more wc du df sort uniq \
+	          xargs cut nl od stat which whoami hexdump vi top free ps kill; do
+		# QUOTE THE WHOLE ASSIGNMENT. Unquoted, alias $_a="busybox $_a" expands
+		# to TWO words - "head=/system/xbin/busybox" and "head" - so alias reads
+		# the second as a lookup of an undefined alias and errors. That printed
+		# ~50 "alias: head not found" lines per shell start and defined nothing.
+		alias "$_a=/system/xbin/busybox $_a"
+	done
+	unset _a
+	alias ls='/system/xbin/busybox ls --color=auto'
+	alias ll='/system/xbin/busybox ls -l --color=auto'
+	alias la='/system/xbin/busybox ls -la --color=auto'
+	alias grep='/system/xbin/busybox grep --color=auto'
+	alias busybox=/system/xbin/busybox
+fi
+
+# vt100 colours.
+# CAREFUL: a shell assignment must be ONE word. "VAR=a b c" assigns a and then
+# RUNS b with argument c. The first version of this line had spaces between the
+# concatenated pieces, so the shell tried to execute the colour code and
+# reported: mkshrc[85]: 01;31: not found
+export LS_COLORS='di=01;34:ln=01;36:so=01;35:pi=33:ex=01;32:bd=01;33:cd=01;33'
+# The prompt embeds literal 0x1b bytes, substituted in at build time by the
+# replace() just below this string - so no printf is needed at runtime.
+# USER_ID is set by mksh itself and the stock rc above already uses it, so
+# no id -u either.
+if (( USER_ID )); then _c=32; _p='$ '; else _c=31; _p='# '; fi
+PS1="[1;${_c}m"'$USER@$HOSTNAME'"[0m:[1;34m"'${PWD:-?}'"[0m$_p"
+unset _c _p
+
+# If we somehow land as non-root, become root via busybox su.
+# Guarded by the marker so the re-exec cannot recurse.
+if (( USER_ID )) && [[ -z $SU_INVOKED && -x /system/xbin/busybox ]]; then
+	export SU_INVOKED=1
+	exec /system/xbin/busybox su -
+fi

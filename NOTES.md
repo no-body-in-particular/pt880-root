@@ -315,7 +315,10 @@ bounding set was the only obstacle.
 ## 7. Userland: /system customisation
 
 `customize_shell.py` edits `system_mod.img` offline (no remount needed to build
-it) and `install_tools.py` adds busybox, htop, dropbear and sshfs.
+it) and `install_tools.py` adds busybox, htop, nano, dropbear and sshfs.
+Alpine armhf packages are used throughout, so every binary is musl-linked and
+is installed as `<name>.bin` plus a wrapper that invokes the musl loader with
+`--library-path /system/xbin`.
 
 Three things that are easy to get wrong, all found by running them:
 
@@ -336,6 +339,20 @@ Three things that are easy to get wrong, all found by running them:
 `TERM` defaults to `xterm-256color`, not the stock `vt100`: vt100 has no colour
 and no ACS line-drawing, so htop and every other ncurses TUI renders as
 monochrome soup. The terminfo entries live in `/system/etc/terminfo`.
+
+**This has to be done by rewriting the stock line**, which is the one edit
+`customize_shell.py` makes to otherwise byte-preserved upstream text. The stock
+rc opens with `: ${TERM:=vt100} ...` and `:=` only assigns when the variable is
+unset, so an appended `: ${TERM:=xterm-256color}` can never fire. The first
+attempt did exactly that, looked right, and changed nothing.
+
+One more ext4 lesson, from installing nano into an image that had already been
+written to several times: an inode holds only **4 inline extents**, and
+`ext4mod.alloc_blocks()` used to append every free run it walked past, so a
+330 KB binary landed in 5 runs and was rejected. It now looks for a single
+contiguous run first and only falls back to the scattered scan. Rebuilding from
+the pristine `system.img` also defragments, and is the safer move when an image
+has been through many rm/add cycles.
 
 `busybox` is mode `06755` (setuid root). `/system` is mounted `ro,relatime`
 with **no** `nosuid`, so setuid is honoured.

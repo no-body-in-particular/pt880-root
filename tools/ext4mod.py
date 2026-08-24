@@ -38,8 +38,41 @@ class Ext4RW(Ext4):
         self.f.seek(pos)
         self.f.write(bytes([b]))
 
+    def _free_runs(self, g):
+        """Yield (start_block, length) for every free run in group g."""
+        bmp = self.gd_field(g, 0x00)
+        base = self.first_data_block + g * self.blocks_per_group
+        end = min(self.blocks_per_group, self.blocks_count - base)
+        self.f.seek(bmp * self.block_size)
+        bits = self.f.read(self.block_size)
+        start = None
+        for i in range(end):
+            free = not ((bits[i // 8] >> (i % 8)) & 1)
+            if free and start is None:
+                start = i
+            elif not free and start is not None:
+                yield base + start, i - start
+                start = None
+        if start is not None:
+            yield base + start, end - start
+
     def alloc_blocks(self, n):
-        """Find n free blocks, preferring one contiguous run per group."""
+        """Find n free blocks, strongly preferring ONE contiguous run.
+
+        An inode holds at most 4 inline extents, so an allocation split across
+        5+ runs cannot be represented and add() rejects it. The original scan
+        appended every free run it walked past, so it happily returned scattered
+        blocks even when a single big run was available - which is how
+        reinstalling a 330 KB binary into an image whose free space had been
+        chopped up by earlier rm/add cycles hit "file too fragmented (5 runs,
+        max 4)". Try for one run first; only fall back to the greedy scan (and
+        the 4-run ceiling) when no single run is large enough.
+        """
+        for g in range(self.groups):
+            for start, ln in self._free_runs(g):
+                if ln >= n:
+                    return self._claim(list(range(start, start + n)))
+
         got = []
         for g in range(self.groups):
             if len(got) >= n:
@@ -62,8 +95,10 @@ class Ext4RW(Ext4):
                 got.extend(run)
         if len(got) < n:
             raise RuntimeError("not enough free blocks (%d/%d)" % (len(got), n))
-        got = got[:n]
-        # mark used and update counters
+        return self._claim(got[:n])
+
+    def _claim(self, got):
+        """Mark blocks used and update the group / superblock counters."""
         per_group = {}
         for b in got:
             g = (b - self.first_data_block) // self.blocks_per_group

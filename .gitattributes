@@ -1,0 +1,8 @@
+# Device files must round-trip byte-for-byte. mkshrc is sourced by mksh on an
+# Android device: CRLF would break it, and Git's autocrlf would introduce it on
+# checkout under Windows. -text disables all end-of-line conversion.
+system/** -text
+fdl/** -text
+firmware/** -text
+*.img -text
+*.bin -text

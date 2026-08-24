@@ -11,7 +11,10 @@ Three things:
      is monochrome and breaks ncurses TUIs like htop).
 
 The existing mkshrc is READ and APPENDED TO, never retyped - its upstream
-content and copyright header are preserved byte-for-byte.
+content and copyright header are preserved byte-for-byte, with exactly one
+documented exception: the stock TERM default is rewritten from vt100 to
+xterm-256color. That cannot be done from the appended block, because the stock
+line uses := and so wins.
 
 The su-exec is guarded twice: it only fires when USER_ID != 0 AND the marker
 variable is unset, so it cannot loop (su spawns a shell, which re-reads this
@@ -33,12 +36,12 @@ RC_ADD = r"""
 # no id, no coreutils at all - /system/xbin is only reachable once this file
 # has already been sourced, so any $(external) here fails at every shell start.
 export PATH=/system/xbin:$PATH
-: ${TERM:=xterm-256color}
-export TERM
-# xterm-256color, not vt100: vt100 has no colour and no ACS line-drawing, so
-# htop and every other ncurses TUI renders as monochrome soup. The entry is
-# installed at /system/etc/terminfo/x/xterm-256color. Only set if the caller
-# did not already export a TERM.
+# No TERM default here. The stock rc at the top of this file already ran
+# ": ${TERM:=vt100} ..." , and := only assigns when the variable is unset - so
+# a second ": ${TERM:=...}" down here can never fire. It looked correct and did
+# nothing; TERM stayed vt100, which has no colour and no ACS line-drawing, so
+# htop rendered as monochrome soup. The fix is in main(): the stock line itself
+# is rewritten to xterm-256color. TERM is already exported by the stock rc.
 # ncurses (htop) looks here for terminal definitions
 export TERMINFO=/system/etc/terminfo
 export TERMINFO_DIRS=/system/etc/terminfo
@@ -104,6 +107,18 @@ def main():
     rc_ino = fs.resolve("/etc/mkshrc")
     original = fs.read_file(fs.read_inode(rc_ino))
     print("  /etc/mkshrc original %d bytes (preserved verbatim)" % len(original))
+    # The ONLY edit made to the stock text, and it has to be made here rather
+    # than in the appended block: the stock line assigns TERM with :=, so by the
+    # time our block runs TERM is already set and cannot be defaulted again.
+    stock_term = b": ${TERM:=vt100}"
+    want_term = b": ${TERM:=xterm-256color}"
+    if stock_term in original:
+        original = original.replace(stock_term, want_term)
+        print("  stock TERM default vt100 -> xterm-256color")
+    elif want_term in original:
+        print("  stock TERM default already xterm-256color")
+    else:
+        print("  WARNING: stock TERM default not found - leaving TERM alone")
     if b"sl8521e-root" in original:
         print("  already customised - stripping previous block")
         original = original.split(b"\n# ---- added by sl8521e-root ----")[0]
@@ -162,8 +177,9 @@ def main():
     added = body.split(b"# ---- added by sl8521e-root ----")[-1]
     code = b"".join(l for l in added.splitlines(True)
                     if not l.lstrip().startswith(b"#"))
-    print("  TERM default        : %s"
-          % ("xterm-256color" if b"xterm-256color" in body else "*** NOT SET ***"))
+    print("  stock TERM line     : %s"
+          % ("xterm-256color" if b": ${TERM:=xterm-256color}" in body
+             else "*** STILL vt100 ***"))
     print("  no printf in code   : %s" % (b"printf" not in code))
     print("  no $(...) in code   : %s" % (b"$(" not in code))
     print("  no id -u in code    : %s" % (b"id -u" not in code))
