@@ -19,6 +19,8 @@ patch offset, and the dead ends worth not repeating.
 | **root shell over adb** | **working** — uid 0 with a full capability set |
 | `/system` writable at runtime | working |
 | busybox / htop / nano / dropbear / sshfs installed | working |
+| Bluetooth audio (A2DP) out to headphones | working |
+| Music player running on the watch | working |
 
 ## Layout
 
@@ -28,6 +30,7 @@ patch offset, and the dead ends worth not repeating.
     scripts/     driver scripts (backup / build / flash / restore)
     analysis/    scratch space for disassembly work
     system/      files as they exist on the device under /system
+    apps/        apps built to run on the watch itself
 
 `tools/` also holds the ext4 reader/writer (`ext4tool.py`, `ext4mod.py`) used
 to edit `system.img` offline, so no device-side remount is needed to build an
@@ -36,6 +39,13 @@ image.
 `firmware/stock/` holds the small, irreplaceable partitions. `system.img`
 (450 MB), `vendor.img` and the modem/DSP images are **not** committed — dump
 them yourself with `scripts/backup.sh`, which writes them alongside.
+
+`apps/watchplayer/` is a Bluetooth music player for the watch: local files to
+A2DP headphones, driven by the two hardware buttons on a 240×240 screen with no
+touchscreen. It is what the root shell was for. Build it with
+`apps/watchplayer/build.sh` (no Gradle — API 19 fights modern AGP) and read
+[its README](apps/watchplayer/README.md), which documents the firmware's
+distinctly odd key handling.
 
 ## Requirements
 

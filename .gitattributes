@@ -6,3 +6,7 @@ fdl/** -text
 firmware/** -text
 *.img -text
 *.bin -text
+
+# Key layouts are pushed verbatim to /system on the device. CRLF would break
+# the layout parser, so keep them LF whatever Git's autocrlf is set to.
+apps/*/keylayout/** -text

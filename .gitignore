@@ -2,3 +2,7 @@
 *.o
 firmware/mydevice/
 analysis/*.txt
+apps/*/build/
+apps/*/*.apk
+apps/*/*.idsig
+apps/*/debug.keystore

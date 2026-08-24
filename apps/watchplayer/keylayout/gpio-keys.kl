@@ -1,0 +1,5 @@
+key 114     VOLUME_DOWN     WAKE
+key 115     VOLUME_UP       WAKE
+key 116     DPAD_DOWN           WAKE
+key 212     CAMERA          WAKE
+key 28     DPAD_CENTER	VIRTUAL
