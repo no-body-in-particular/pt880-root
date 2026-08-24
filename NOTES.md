@@ -177,7 +177,59 @@ Every claim in this document has one behind it.
 
 ---
 
-## 6. Status
+## 6. Root: adbd and capabilities
+
+adbd is vendor-modified and does **not** reference `ro.secure` at all — only
+`ro.debuggable`, `service.adb.root` and `ro.adb.secure`. All were satisfied on
+the device and it still dropped to uid 2000. It is statically linked ET_EXEC
+ARM32 with no PLT, and its string references resolve through neither literal
+pools nor `movw`/`movt`, so locating the decision branch was slow.
+
+Patching bionic's **syscall stubs** sidesteps the logic entirely. Overwrite each
+stub entry with `mov r0,#0 / bx lr` and the call returns success without
+performing the syscall:
+
+| adbd offset | Syscall | Effect |
+|---|---|---|
+| `0x010104` | `setgid32` | uid/gid drop fails silently |
+| `0x010144` | `setgroups32` | |
+| `0x01b790` | `setuid32` | -> adb shell is **uid 0** |
+| `0x010164` | `prctl` | -> full capabilities, writable `/system` |
+
+**Two stub prologues exist.** Most are `mov ip, r7` (`0xE1A0C007`); stubs that
+reload arguments off the stack — `prctl` — use `mov ip, sp` (`0xE1A0C00D`) and
+their entry sits 4 bytes earlier than you would guess. `build_boot_root.py`
+guards on both and refuses to patch anything else.
+
+### Why prctl is the one that matters
+
+Measured on the device:
+
+    init (pid 1):   CapPrm=3fffffffff  CapEff=3fffffffff  CapBnd=3fffffffff
+    adbd:           CapPrm=3fffffffff  CapEff=3fffffffff  CapBnd=00000000c0
+    adb shell:      CapPrm=00c0        CapEff=00c0        CapBnd=00c0
+
+adbd keeps **full** `CapPrm`/`CapEff` for itself and only shrinks its *bounding*
+set to `0xc0` (`CAP_SETUID|CAP_SETGID`) via `prctl(PR_CAPBSET_DROP)`. On
+`execve` a child's permitted set is masked by the bounding set, so every shell
+adbd spawns inherits `0xc0` — no `CAP_SYS_ADMIN`, so `mount -o remount,rw` fails
+even as uid 0. Neutering `prctl` stops the bounding-set drop.
+
+## 7. FOTA
+
+Two OTA clients ship on this device and either can push a vendor image over
+everything patched here:
+
+    com.adups.fota.sysoper   /system/app/FotaUpdateReboot.apk    (Adups)
+    com.ic.icfotaclient      /system/app/ICFotaClient.apk        (runs at boot)
+
+`scripts/disable_fota.sh` disables both. `pm disable` is persistent — stored in
+`/data/system/users/0/package-restrictions.xml` — and `persist.sys.ota.host2`
+(the endpoint, `http://ota.beehome360.com/checkota.aspx`) is repointed at
+localhost and persists in `/data/property`. Renaming the APKs additionally
+requires a writable `/system`, i.e. the `prctl` patch above.
+
+## 8. Status
 
 Working:
 
@@ -187,7 +239,8 @@ Working:
 
 Open:
 
-- `adb shell` lands as `uid=2000(shell)`, not root. `adbd` is vendor-modified —
+- toybox / dropbear / sshfs / htop not yet installed
+- **done:** `adb shell` is `uid=0(root)`. `adbd` is vendor-modified —
   it does **not** reference `ro.secure` at all, only `ro.debuggable`,
   `service.adb.root` and `ro.adb.secure` — and it still drops privileges with
   `ro.debuggable=1` and `service.adb.root=1` both set. SELinux is **Disabled**,
