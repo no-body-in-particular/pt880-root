@@ -16,7 +16,9 @@ patch offset, and the dead ends worth not repeating.
 | Bootchain unlock (permanent, no PC at boot) | working |
 | Boot a modified boot image | working |
 | adb over USB | working |
-| **root shell over adb** | **open** — see NOTES.md section 6 |
+| **root shell over adb** | **working** — uid 0 with a full capability set |
+| `/system` writable at runtime | working |
+| busybox / htop / dropbear / sshfs installed | working |
 
 ## Layout
 
@@ -25,6 +27,10 @@ patch offset, and the dead ends worth not repeating.
     firmware/    byte-exact stock dumps of the bootchain (restore sources)
     scripts/     driver scripts (backup / build / flash / restore)
     analysis/    scratch space for disassembly work
+
+`tools/` also holds the ext4 reader/writer (`ext4tool.py`, `ext4mod.py`) used
+to edit `system.img` offline, so no device-side remount is needed to build an
+image.
 
 `firmware/stock/` holds the small, irreplaceable partitions. `system.img`
 (450 MB), `vendor.img` and the modem/DSP images are **not** committed — dump
@@ -55,6 +61,21 @@ Build a rooted boot image from **your own** dump:
 
 ```bash
 ./scripts/build.sh ./firmware/mydevice
+```
+
+The image that gives a genuine root shell is built by
+`tools/build_boot_capbnd.py`. It neuters adbd's three privilege-drop syscall
+stubs *and* disables the capability-bounding-set drop with a one-byte edit, so
+`adb shell` lands as uid 0 with `CapBnd=3fffffffff` and can remount `/system`
+itself. `tools/build_boot_root.py` is the earlier version — uid 0 but
+`CapBnd=0xc0`, so no remount. See NOTES.md section 6.
+
+Customise `/system` offline (busybox aliases, colour prompt, `xterm-256color`,
+`/etc/resolv.conf`, setuid busybox) and install the extra tools:
+
+```bash
+python tools/install_tools.py
+python tools/customize_shell.py
 ```
 
 Flash the unlock (bootchain + boot image):

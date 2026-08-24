@@ -42,21 +42,41 @@ import io
 import sys
 
 STOCK = r"C:\wpull\dump_watch2\boot_stock_exact.img"
-OUT = r"C:\wpull\dump_watch2\boot_root_fdl.img"
+OUT = r"C:\wpull\dump_watch2\boot_capbnd_fdl.img"
 
 MOV_R0_0 = 0xE3A00000
 BX_LR = 0xE12FFF1E
 # entry offsets inside sbin/adbd (file offsets in the extracted binary)
 ADBD_SITES = [(0x010104, "setgid32"), (0x010144, "setgroups32"),
               (0x01b790, "setuid32")]
-# NOT patched: prctl (stub entry 0x010164). Neutering the whole stub DID stop
-# the PR_CAPBSET_DROP, but it also killed adbd - the device stopped enumerating
-# over USB. The stub has three callers and only one is the capability drop, so
-# returning 0 for all of them breaks the other two.
+# The prctl STUB (entry 0x010164) is deliberately NOT neutered. It has three
+# callers and only one of them is the capability drop, so returning 0 for all
+# three broke adbd outright (the device stopped enumerating over USB). A later
+# note claimed the stub was unreferenced dead code - that was an artefact of
+# scanning for ARM BL only. adbd is Thumb-2 and reaches the ARM stub through
+# BLX; decoded properly there are 3 call sites: 0x9206, 0x921e, 0x23fe2.
 #
-# This image therefore still leaves CapBnd=0xc0 and CANNOT remount /system.
-# SUPERSEDED by build_boot_capbnd.py, which rewrites one byte inside the drop
-# loop instead of disabling the stub. See NOTES.md section 6.
+# The drop is AOSP drop_capabilities_bounding_set_if_needed(), inlined at
+# va 0x91f8..0x921e:
+#
+#     movs r4, #0            i = 0
+#     movs r0, #0x17         PR_CAPBSET_READ
+#     blx  prctl
+#     subs r3, r4, #6
+#     cmp  r3, #1
+#     bls  skip              i == 6 (CAP_SETGID) / 7 (CAP_SETUID) -> keep
+#     movs r0, #0x18         PR_CAPBSET_DROP     <-- the one byte that matters
+#     blx  prctl
+#
+# leaving CapBnd = 0xc0 exactly. So it IS adbd, and no helper service is
+# needed: rewriting that single constant from 24 (PR_CAPBSET_DROP) to 23
+# (PR_CAPBSET_READ) turns the drop into a harmless read. The loop still runs
+# and still calls prctl, so the other two call sites and every non-capability
+# use of prctl are untouched - which is why the blanket stub patch failed and
+# this one does not. Result: CapBnd stays 3fffffffff and "adb shell" is a real
+# root shell that can remount /system itself.
+ADBD_CONST = [(0x001216, b"\x18\x20", b"\x17\x20",
+               "PR_CAPBSET_DROP(24) -> PR_CAPBSET_READ(23)")]
 
 d = open(STOCK, "rb").read()
 q = d[0x200:]
@@ -111,6 +131,14 @@ while i + 110 <= len(raw):
             struct.pack_into("<I", b, off, MOV_R0_0)
             struct.pack_into("<I", b, off + 4, BX_LR)
             print("  adbd 0x%06x  %-12s -> mov r0,#0 / bx lr" % (off, sym))
+        for off, want, repl, sym in ADBD_CONST:
+            cur = bytes(b[off:off + len(want)])
+            if cur != want:
+                sys.exit("adbd 0x%06x is %s, expected %s (%s)"
+                         % (off, cur.hex(), want.hex(), sym))
+            b[off:off + len(repl)] = repl
+            print("  adbd 0x%06x  %s -> %s  %s"
+                  % (off, want.hex(), repl.hex(), sym))
         data = bytes(b)
         edited["sbin/adbd"] = len(data)
 

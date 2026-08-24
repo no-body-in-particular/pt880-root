@@ -260,8 +260,14 @@ WRITE_STAGES = {
     # region at all. boot_patched_fdl.img keeps the stock geometry exactly -
     # same total size, same payload field, byte-identical kernel and
     # signature regions - and differs only in the ramdisk.
-    "flash":   ("boot", "boot_min_fdl.img"),
+    "flash":   ("boot", "boot_rootsvc_fdl.img"),
     "restore": ("boot", "boot_restore_fdl.img"),
+    # One-byte fix to adbd's inlined drop_capabilities_bounding_set_if_needed():
+    # PR_CAPBSET_DROP(24) -> PR_CAPBSET_READ(23) at adbd file offset 0x1216, so
+    # the loop reads instead of dropping and CapBnd stays 3fffffffff. Gives a
+    # real root shell over adb that can remount /system on its own.
+    # Roll back with the "stockwrite" stage (boot_stock_exact.img).
+    "capbnd": ("boot", "boot_capbnd_fdl.img"),
 }
 # 0x1000 (4096) meant a 10MB boot write was 2,464 round-trips, and it always
 # died on the final block. The 64KB write test (16 round-trips) committed
@@ -424,6 +430,49 @@ def build_cmd(exe, stage, wait, outdir, wtimeout=0, use_cve=False):
         cmd += ["reset"]
         return cmd
 
+    if stage == "bootsys":
+        # Both writes in ONE session. Catching boot ROM mode is the slow,
+        # fiddly part of this whole process, so do not make the user do it
+        # twice for two partitions that are always flashed together.
+        #
+        # system goes FIRST deliberately. It is the 450MB write and by far the
+        # likeliest to be interrupted; boot is 10MB and takes seconds. Doing the
+        # big one while the link is freshest, and leaving only a short window at
+        # the end, keeps the device in the most recoverable state: a half-written
+        # system with a working stock boot still enumerates over adb.
+        sysimg = os.path.join(outdir, "system_mod.img")
+        bootimg = os.path.join(outdir, "boot_capbnd_fdl.img")
+        for p in (sysimg, bootimg):
+            if not os.path.isfile(p):
+                sys.exit("missing " + p)
+        print("system %d bytes (%.0f MB)  boot %d bytes"
+              % (os.path.getsize(sysimg), os.path.getsize(sysimg) / 1048576.0,
+                 os.path.getsize(bootimg)))
+        cmd += ["write_part", "system", sysimg]
+        cmd += ["write_part", "boot", bootimg]
+        # boot is small, so verifying it costs seconds and is worth it.
+        cmd += ["read_part", "boot", "0", str(os.path.getsize(bootimg)),
+                os.path.join(outdir, "boot_verify.img")]
+        cmd += ["reset"]
+        return cmd
+
+    if stage == "flashsystem":
+        # /system is in NEITHER FDL2's nor uboot's secure-partition table, so it
+        # needs no un-gating and nothing verifies it. 450MB, so this bypasses
+        # WRITE_LIMIT (a boot-partition sanity check, irrelevant here).
+        src = os.path.join(outdir, "system_mod.img")
+        if not os.path.isfile(src):
+            sys.exit("missing " + src)
+        sz = os.path.getsize(src)
+        print("system image %d bytes (%.0f MB), %d blocks"
+              % (sz, sz / 1048576.0, (sz + 0xfff) // 0x1000))
+        # No read_part here: reading 450MB back doubles the session for a
+        # partition nothing gates and nothing verifies, and every extra
+        # minute on the link is another chance to drop the connection.
+        cmd += ["write_part", "system", src]
+        cmd += ["reset"]
+        return cmd
+
     if stage == "sizeprobe":
         # write -> read back -> next size, all in one session. Each read_part
         # asks for exactly the number of bytes written, so the comparison is
@@ -485,7 +534,7 @@ GOOD = ("chip", "uid", "verify", "exec", "fdl2", "partition", "sprd", "connect")
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("stage", choices=["probe","diag","readlog","verifyboot","readmarker","writetest","bcbfastboot","backup1","backup2","backup3","backup4","backup34","backup_rest","flash","restore","sizeprobe","stockwrite","flashnosig","stocknosig","cachetest","unlock","restoreall","unlockall","uboot2"])
+    ap.add_argument("stage", choices=["probe","diag","readlog","verifyboot","readmarker","writetest","bcbfastboot","backup1","backup2","backup3","backup4","backup34","backup_rest","flash","restore","sizeprobe","stockwrite","flashnosig","stocknosig","cachetest","unlock","restoreall","unlockall","uboot2","flashsystem","capbnd","bootsys"])
     ap.add_argument("--attempts", type=int, default=999,
                     help="how many times to re-arm (default: keep going)")
     ap.add_argument("--wait", type=int, default=60,

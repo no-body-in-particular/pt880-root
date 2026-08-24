@@ -201,7 +201,7 @@ reload arguments off the stack — `prctl` — use `mov ip, sp` (`0xE1A0C00D`) a
 their entry sits 4 bytes earlier than you would guess. `build_boot_root.py`
 guards on both and refuses to patch anything else.
 
-### Why prctl is the one that matters
+### What actually drops the capabilities
 
 Measured on the device:
 
@@ -209,13 +209,138 @@ Measured on the device:
     adbd:           CapPrm=3fffffffff  CapEff=3fffffffff  CapBnd=00000000c0
     adb shell:      CapPrm=00c0        CapEff=00c0        CapBnd=00c0
 
-adbd keeps **full** `CapPrm`/`CapEff` for itself and only shrinks its *bounding*
-set to `0xc0` (`CAP_SETUID|CAP_SETGID`) via `prctl(PR_CAPBSET_DROP)`. On
-`execve` a child's permitted set is masked by the bounding set, so every shell
-adbd spawns inherits `0xc0` — no `CAP_SYS_ADMIN`, so `mount -o remount,rw` fails
-even as uid 0. Neutering `prctl` stops the bounding-set drop.
+adbd keeps **full** `CapPrm`/`CapEff` and only shrinks its *bounding* set to
+`0xc0` (`CAP_SETUID|CAP_SETGID`). On `execve` a child's permitted set is masked
+by the bounding set, so every shell adbd spawns inherits `0xc0` — no
+`CAP_SYS_ADMIN`, so `mount -o remount,rw` fails even as uid 0.
 
-## 7. FOTA
+It is adbd doing this to itself. Two earlier conclusions in this file were
+wrong and are worth recording so nobody repeats them:
+
+1. *"Neutering the prctl stub is the fix."* It stops the drop, but also kills
+   adbd — the device stops enumerating over USB. The stub has **three** callers
+   and only one is the capability drop.
+2. *"The prctl stub is unreferenced dead code, so something else must be
+   dropping the caps."* Wrong, and for a dull reason: the scan behind it decoded
+   **ARM** `BL` only. adbd is Thumb-2 and reaches the ARM stub through **`BLX`**.
+
+The check that catches both errors is to point the scan at a stub whose
+reachability is already known. `setuid32` is patched in this very image and the
+patch demonstrably works, so it *must* have callers. An ARM-only scan reports
+zero for it too — which is the tell that the scan, not the binary, is at fault.
+
+Decoded correctly, the drop is AOSP `drop_capabilities_bounding_set_if_needed()`
+inlined at `va 0x91f8`:
+
+    91f8  movs r4, #0        i = 0
+    91fe  movs r0, #0x17     PR_CAPBSET_READ   ┐ loop condition
+    9206  blx  prctl                           │
+    920a  cmp  r0, #0                          │
+    920c  blt  0x923a        read fails -> end ┘
+    920e  subs r3, r4, #6    ┐ i-6 unsigned <= 1
+    9210  cmp  r3, #1        │  <=> i == 6 (CAP_SETGID)
+    9212  bls  0x9226        ┘  or i == 7 (CAP_SETUID) -> keep
+    9216  movs r0, #0x18     PR_CAPBSET_DROP    <-- the one byte that matters
+    921e  blx  prctl
+
+Upstream uses `PR_CAPBSET_READ` as the loop condition and skips `CAP_SETUID` /
+`CAP_SETGID` because `/system/bin/run-as` needs them; the compiler folded the
+two equality tests into one unsigned range check. Result: `CapBnd` = `0xc0`
+exactly, which is what we measured.
+
+Upstream's early return for `ro.debuggable=1` sits inside `#ifdef
+ALLOW_ADBD_ROOT`. **This vendor built without it**, so that return is not in the
+binary — the only code between `getenv("ADB_EXTERNAL_STORAGE")` and the loop is
+the matching `setenv`. That is why setting `ro.debuggable=1`, `ro.adb.secure=0`
+and `service.adb.root=1` never helped: the property is read by
+`should_drop_privileges()`, but the capability path is not guarded at all.
+
+### The fix: one byte
+
+`build_boot_capbnd.py` rewrites adbd file offset `0x001216` from `18 20` to
+`17 20` — `movs r0,#24` (`PR_CAPBSET_DROP`) becomes `movs r0,#23`
+(`PR_CAPBSET_READ`). The loop still runs and still calls prctl, so the other two
+call sites and every non-capability use of prctl are untouched. Nothing is
+dropped.
+
+Result: `adb shell` is uid 0 with `CapBnd=3fffffffff` and can
+`mount -o remount,rw /system` on its own. No `su`, no daemon, no helper service.
+
+### Audit: nothing else drops privileges
+
+adbd is statically linked, so a syscall it never calls has **no stub linked in
+at all** — absence is proof rather than "no caller found". Every
+privilege-relevant stub present:
+
+| Syscall | Status |
+|---|---|
+| `setuid32` (213) | neutered |
+| `setgid32` (214) | neutered |
+| `setgroups32` (206) | neutered |
+| `prctl` (172) | capbset drop -> read |
+| `setsid` (66) | left alone — session leader, not a privilege drop |
+
+**No stub exists** for `capset`, `capget`, `setresuid32`, `setresgid32`,
+`setreuid32`, `setregid32`, `setfsuid32`, `setfsgid32`, `setrlimit`,
+`prlimit64`, `chroot`, `unshare`, `personality` or `seccomp`. So there is no
+second path to uid/gid, no `capset` masking, no `PR_SET_NO_NEW_PRIVS` (which
+would have blocked the setuid busybox) and no seccomp filter.
+
+Open: the third prctl call site at `va 0x23fe2` has not been identified — its
+option is not a nearby literal and the surrounding bytes did not frame from a
+valid instruction boundary. It is outside the capability path, which is fully
+accounted for by the two sites above, and the one-byte patch does not touch it.
+
+### How SuperSU solves the same problem
+
+Recorded because it is the obvious next move if the one-byte patch ever stops
+working. `PR_CAPBSET_DROP` is irreversible for a process *and all descendants*,
+so no `su` binary can restore caps inside adbd's tree. SuperSU sidesteps the
+tree instead:
+
+1. `daemonsu` starts at boot from init, so it never inherits the drop — full
+   `CapBnd`, and on SELinux devices an unconfined context.
+2. The `su` you type is only a **client**. It connects to the daemon over a unix
+   socket and passes its stdin/stdout/stderr through `SCM_RIGHTS`, along with
+   argv, env, cwd and terminal geometry.
+3. The daemon forks a privileged child, `dup2`s those fds onto its stdio and
+   execs the shell. Exit status returns over the socket.
+
+The shell is a child of the daemon but wired to your terminal, so it feels like
+a normal `su`. `build_boot_rootsvc.py` is a crude version of step 1 without
+steps 2-3, which is why it can only run commands from a file rather than give
+you a shell. On this device none of it is needed: SELinux is Disabled and the
+bounding set was the only obstacle.
+
+## 7. Userland: /system customisation
+
+`customize_shell.py` edits `system_mod.img` offline (no remount needed to build
+it) and `install_tools.py` adds busybox, htop, dropbear and sshfs.
+
+Three things that are easy to get wrong, all found by running them:
+
+- **No external commands in `/etc/mkshrc`.** The stock image has no `printf`,
+  no `id`, no coreutils, and `/system/xbin` is only reachable *after* the rc has
+  been sourced. `_e=$(printf '')` fails on every shell start. Literal 0x1b
+  bytes are substituted into the file at build time via an `@ESC@` placeholder,
+  and `USER_ID` (set by mksh, already used by the stock rc) replaces `id -u`.
+- **Quote the whole alias assignment.** `alias $_a="busybox $_a"` expands to two
+  words, so alias reads the second as a lookup of an undefined alias and errors
+  — ~50 failures per shell start, and not one alias defined. `alias
+  "$_a=/system/xbin/busybox $_a"` is one word.
+- **`/etc/resolv.conf` does not exist on Android.** bionic resolves through the
+  `net.dns1`/`net.dns2` properties. Every musl-linked tool installed here reads
+  the file instead and fails with `Error resolving '<host>'` — routing is fine,
+  only the resolver is missing. `customize_shell.py` writes one.
+
+`TERM` defaults to `xterm-256color`, not the stock `vt100`: vt100 has no colour
+and no ACS line-drawing, so htop and every other ncurses TUI renders as
+monochrome soup. The terminfo entries live in `/system/etc/terminfo`.
+
+`busybox` is mode `06755` (setuid root). `/system` is mounted `ro,relatime`
+with **no** `nosuid`, so setuid is honoured.
+
+## 8. FOTA
 
 Two OTA clients ship on this device and either can push a vendor image over
 everything patched here:
@@ -229,21 +354,31 @@ everything patched here:
 localhost and persists in `/data/property`. Renaming the APKs additionally
 requires a writable `/system`, i.e. the `prctl` patch above.
 
-## 8. Status
+## 9. Status
 
 Working:
 
 - Full bootchain unlock, permanent, no PC needed at boot time
-- Rooted-properties boot image running on the device
+- Rooted boot image running on the device
 - **adb connects** over USB
+- **`adb shell` is `uid=0(root)` with `CapBnd=3fffffffff`** — a real root shell,
+  no `su` and no daemon. `mount -o remount,rw /system` works from it.
+- **`/system` writable at runtime**, and rebuildable offline with
+  `customize_shell.py` / `install_tools.py`
+- busybox (setuid root), htop, dropbear and sshfs installed
+- DNS works for musl-linked tools (`/etc/resolv.conf` added)
+- FOTA disabled — see section 8
+
+How root was reached, in order: three bionic syscall stubs neutered in
+`sbin/adbd` (`setgid32`, `setgroups32`, `setuid32`) give uid 0, and one byte at
+adbd offset `0x001216` turns `PR_CAPBSET_DROP` into `PR_CAPBSET_READ`, which
+leaves the capability bounding set intact. Section 6 has the full derivation and
+the two wrong turns taken on the way.
 
 Open:
 
-- toybox / dropbear / sshfs / htop not yet installed
-- **done:** `adb shell` is `uid=0(root)`. `adbd` is vendor-modified —
-  it does **not** reference `ro.secure` at all, only `ro.debuggable`,
-  `service.adb.root` and `ro.adb.secure` — and it still drops privileges with
-  `ro.debuggable=1` and `service.adb.root=1` both set. SELinux is **Disabled**,
-  so that is not the cause. Next step: patch `sbin/adbd`'s privilege drop
-  directly, or add an `su` / root service to the ramdisk (about 2 KB of budget
-  is available).
+- The third prctl call site at `va 0x23fe2` is unidentified (section 6). Outside
+  the capability path, so it does not affect anything here.
+- `/etc/resolv.conf` ships static public resolvers, because the DHCP-assigned
+  ones change per network. If a network forces its own, rewrite it from
+  `getprop net.dns1` — `/system` is remountable now.
