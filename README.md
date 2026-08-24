@@ -1,8 +1,10 @@
-# sl8521e-root
+# pt880 root
 
-Tooling to dump, patch and reflash a Unisoc **SL8521E** kids' GPS watch
-(`sp9820e_1h10` / `sl8521e_1h10ll_watch_native`, Android 4.4.4) in order to get
-adb access on your own hardware.
+Root for the ThinkRace inmate tracker — a Unisoc **SL8521E** wrist-worn tracking
+device (`sp9820e_1h10` / `sl8521e_1h10ll_watch_native`, Android 4.4.4).
+
+Tooling to dump, patch and reflash it, so you get adb and a root shell on
+hardware you own.
 
 Read [NOTES.md](NOTES.md) first — it documents the verification chain, every
 patch offset, and the dead ends worth not repeating.
@@ -27,7 +29,7 @@ patch offset, and the dead ends worth not repeating.
     tools/       flashing stack and image builders
     fdl/         donor FDL1/FDL2 + CVE-2022-38694 payloads
     firmware/    byte-exact stock dumps of the bootchain (restore sources)
-    scripts/     driver scripts (backup / build / flash / restore)
+    scripts/     driver scripts (backup / build / flash / restore / fetch)
     analysis/    scratch space for disassembly work
     system/      files as they exist on the device under /system
     protocol/    what the tracker app speaks to its server, and the
@@ -37,6 +39,10 @@ patch offset, and the dead ends worth not repeating.
 `tools/` also holds the ext4 reader/writer (`ext4tool.py`, `ext4mod.py`) used
 to edit `system.img` offline, so no device-side remount is needed to build an
 image.
+
+Full stock and patched firmware images are hosted outside git — see
+[firmware/DOWNLOADS.md](firmware/DOWNLOADS.md), or fetch and verify them with
+`./scripts/fetch-firmware.sh`.
 
 `firmware/stock/` holds the small, irreplaceable partitions. `system.img`
 (450 MB), `vendor.img` and the modem/DSP images are **not** committed — dump

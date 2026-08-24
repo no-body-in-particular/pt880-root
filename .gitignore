@@ -7,3 +7,4 @@ apps/*/*.apk
 apps/*/*.idsig
 apps/*/debug.keystore
 firmware/stock/miscdata.img
+firmware/download/
