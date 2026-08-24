@@ -10,6 +10,13 @@ Analysed build: `/system/priv-app/L009_Protocol.apk` + `.odex`, `versionName`
 Everything below is derived from the firmware on this watch. Nothing is
 inferred from what a tracker "usually" does.
 
+Per-unit identifiers are redacted: `<device-id>` is the id the watch sends in
+its login and heartbeat frames, `<password>` is the SMS command password. The
+password in particular gates the microphone and camera commands in section 6,
+so it does not belong in a repository even when it is the factory default.
+The server address is left in - it is vendor infrastructure, not something
+that identifies this unit.
+
 ## TL;DR
 
 - The watch speaks **Thinkrace IW** (`IWAP`/`IWBP`), **not** the widely-posted
@@ -28,9 +35,9 @@ inferred from what a tracker "usually" does.
 Captured on the live socket with `tcpdump -i seth_lte0 -A`:
 
 ```
-IWBPXL,<device-id>,080835#      server -> watch
-IWAPXL,080835#                       watch  -> server
-IWAP03,<id>,0,00,8,600#    watch  -> server
+IWBPXL,<device-id>,080835#     server -> watch
+IWAPXL,080835#                 watch  -> server
+IWAP03,<id>,0,00,8,600#        watch  -> server
 ```
 
     IW  <dir><opcode> , <field> , <field> ... #
