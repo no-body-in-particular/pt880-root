@@ -10,3 +10,7 @@ firmware/** -text
 # Key layouts are pushed verbatim to /system on the device. CRLF would break
 # the layout parser, so keep them LF whatever Git's autocrlf is set to.
 apps/*/keylayout/** -text
+
+# Shell scripts must stay LF. With core.autocrlf=true a Windows clone would
+# otherwise get CRLF and bash fails on the shebang with $'\r': command not found.
+*.sh text eol=lf
