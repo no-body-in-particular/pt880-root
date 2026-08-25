@@ -44,11 +44,15 @@ def main():
         m = re.search(r"[?&]s=([01])", f[4])
         if not m:
             continue                      # written by a build before tagging
+        tn = re.search(r"[?&]tn=(\d+)", f[4])
+        tw = re.search(r"[?&]tw=(\d+)", f[4])
         try:
             t = datetime.datetime.strptime(f[1].strip(), "%a %d %b %Y %H:%M:%S %z")
         except ValueError:
             continue
-        rows.append((t, int(f[3]), m.group(1) == "1"))
+        rows.append((t, int(f[3]), m.group(1) == "1",
+                     int(tn.group(1)) if tn else -1,
+                     int(tw.group(1)) if tw else -1))
 
     if not rows:
         print("no tagged requests yet -- needs a download from v5.5 or later")
@@ -59,11 +63,21 @@ def main():
           % (len(rows), rows[0][0].strftime("%d %b %H:%M"),
              rows[-1][0].strftime("%d %b %H:%M")))
 
+    # Where a block's time actually goes, as reported by the watch itself.
+    net = [r[3] for r in rows if r[3] >= 0]
+    wri = [r[4] for r in rows if r[4] >= 0]
+    if net and wri:
+        print("\nself-reported per block: network %dms median, card %dms median"
+              % (statistics.median(net), statistics.median(wri)))
+        print("  card is %.0f%% of the two"
+              % (100.0 * statistics.median(wri)
+                 / max(1, statistics.median(wri) + statistics.median(net))))
+
     # gaps[(screen_on, bucket)] -> seconds per block
     gaps = {}
     bytes_by = {}
     for i in range(1, len(rows)):
-        t, size, on = rows[i]
+        t, size, on = rows[i][0], rows[i][1], rows[i][2]
         gap = (t - rows[i - 1][0]).total_seconds()
         if gap <= 0 or gap > MAX_GAP_S:
             continue
