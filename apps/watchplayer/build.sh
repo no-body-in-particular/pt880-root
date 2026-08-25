@@ -5,19 +5,32 @@
 # than it helps, so this drives the SDK tools directly —
 # aapt -> javac -> d8 -> zipalign -> apksigner.
 #
+# Runs on both Windows/MSYS and Linux: the SDK ships .exe/.bat wrappers on
+# the former and bare executables on the latter, so the suffixes are probed
+# rather than hardcoded.
+#
 # Override ANDROID_SDK_ROOT / JAVA_HOME if yours live elsewhere.
 set -e
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$HOME/AppData/Local/Android/Sdk}}"
-[ -d "$SDK" ] || { echo "Android SDK not found at $SDK — set ANDROID_SDK_ROOT" >&2; exit 1; }
+SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+if [ -z "$SDK" ]; then
+  for c in "$HOME/AppData/Local/Android/Sdk" "$HOME/Android/Sdk" \
+           "$HOME/Library/Android/sdk" /opt/android-sdk; do
+    [ -d "$c" ] && { SDK="$c"; break; }
+  done
+fi
+[ -n "$SDK" ] && [ -d "$SDK" ] || { echo "Android SDK not found — set ANDROID_SDK_ROOT" >&2; exit 1; }
 
 # Newest build-tools and platform present, rather than a pinned version.
 BT="$(ls -d "$SDK"/build-tools/*/ 2>/dev/null | sort -V | tail -1)"
 BT="${BT%/}"
 AJAR="$(ls "$SDK"/platforms/*/android.jar 2>/dev/null | sort -V | tail -1)"
 [ -n "$BT" ] && [ -n "$AJAR" ] || { echo "need build-tools and a platform android.jar under $SDK" >&2; exit 1; }
+
+# .exe/.bat on Windows, bare names everywhere else.
+if [ -f "$BT/aapt.exe" ]; then EXE=".exe"; BAT=".bat"; else EXE=""; BAT=""; fi
 
 # keytool is not on PATH on this box even though java is (Oracle's javapath
 # shim only exports java/javaw/javac), so locate it next to javac.
@@ -45,7 +58,7 @@ rm -rf "$OUT"
 mkdir -p "$OUT/classes" "$OUT/dex" "$OUT/gen"
 
 echo "[1/6] resources + manifest"
-"$BT/aapt.exe" package -f -m \
+"$BT/aapt$EXE" package -f -m \
     -M "$(w "$HERE/AndroidManifest.xml")" \
     -S "$(w "$HERE/res")" \
     -I "$(w "$AJAR")" \
@@ -63,14 +76,14 @@ javac -nowarn -encoding UTF-8 \
 
 echo "[3/6] dex"
 find "$OUT/classes" -name '*.class' | wlist > "$OUT/classes.txt"
-"$BT/d8.bat" --release --min-api 19 --lib "$(w "$AJAR")" \
+"$BT/d8$BAT" --release --min-api 19 --lib "$(w "$AJAR")" \
     --output "$(w "$OUT/dex")" @"$OUT/classes.txt"
 
 echo "[4/6] package dex into apk"
-( cd "$OUT/dex" && "$BT/aapt.exe" add -k "$(w "$OUT/base.apk")" classes.dex >/dev/null )
+( cd "$OUT/dex" && "$BT/aapt$EXE" add -k "$(w "$OUT/base.apk")" classes.dex >/dev/null )
 
 echo "[5/6] zipalign"
-"$BT/zipalign.exe" -f 4 "$(w "$OUT/base.apk")" "$(w "$OUT/aligned.apk")"
+"$BT/zipalign$EXE" -f 4 "$(w "$OUT/base.apk")" "$(w "$OUT/aligned.apk")"
 
 if [ ! -f "$KS" ]; then
   echo "      creating debug keystore"
@@ -81,7 +94,7 @@ fi
 
 echo "[6/6] sign"
 # minSdk 19 needs a v1 (JAR) signature; v2 is harmless alongside it.
-"$BT/apksigner.bat" sign \
+"$BT/apksigner$BAT" sign \
     --ks "$(w "$KS")" --ks-pass pass:android --key-pass pass:android \
     --min-sdk-version 19 \
     --v1-signing-enabled true --v2-signing-enabled true \
