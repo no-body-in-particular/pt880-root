@@ -57,6 +57,11 @@ public class PlayerActivity extends Activity
     /** At or below this the battery readout turns red. */
     private static final int LOW_BATTERY_PCT = 15;
 
+    /** Status bar text, in px, and the battery glyph drawn to match it.
+     *  40x22 keeps the launcher's own 36:20 aspect for the glyph. */
+    private static final int STATUS_PX = 22;
+    private static final int BATT_W_PX = 40, BATT_H_PX = 22;
+
     private MusicService svc;
     private BtHelper bt;
     private AudioManager audio;
@@ -79,6 +84,7 @@ public class PlayerActivity extends Activity
     // views
     private TextView vStatus, vTitle, vSub, vVol, vHint;
     private TextView vClock, vBatt;
+    private BatteryIcon vBattIcon;
     private LinearLayout vList, volBarRow;
     private View volFill, volRest;
     private ScrollView vScroll;
@@ -183,17 +189,27 @@ public class PlayerActivity extends Activity
         // --- status bar: clock left, battery right. Built onto the root
         // rather than the now-playing pane so it survives the switch to
         // the menu and Bluetooth screens.
-        vClock = text(11, 0xFF999999, false);
-        vClock.setGravity(Gravity.LEFT);
-        vBatt = text(11, 0xFF999999, false);
-        vBatt.setGravity(Gravity.RIGHT);
+        vClock = text(STATUS_PX, 0xFF999999, false);
+        vClock.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
+        vBatt = text(STATUS_PX, 0xFF999999, false);
+        vBatt.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        vBattIcon = new BatteryIcon(this);
 
         LinearLayout statusBar = new LinearLayout(this);
         statusBar.setOrientation(LinearLayout.HORIZONTAL);
+        statusBar.setGravity(Gravity.CENTER_VERTICAL);
+        // The clock takes the slack, so it sits hard left and the battery
+        // stays hard right whatever the time string measures.
         statusBar.addView(vClock, new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        // Percentage then glyph, the order the launcher's head bar uses.
         statusBar.addView(vBatt, new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+        LinearLayout.LayoutParams bip =
+                new LinearLayout.LayoutParams(BATT_W_PX, BATT_H_PX);
+        bip.leftMargin = 4;
+        statusBar.addView(vBattIcon, bip);
 
         // --- now playing pane
         LinearLayout now = new LinearLayout(this);
@@ -332,12 +348,18 @@ public class PlayerActivity extends Activity
         if (vClock == null) return;
         vClock.setText(clockFmt.format(new Date()));
 
-        if (battPct < 0) { vBatt.setText(""); return; }
-        // "+" for charging instead of a bolt: this build's font is missing
-        // most of the symbol range (same reason the volume bar is drawn).
-        vBatt.setText(battPct + "%" + (battCharging ? "+" : ""));
-        vBatt.setTextColor(battCharging ? 0xFF7FB3FF
-                : (battPct <= LOW_BATTERY_PCT ? 0xFFFF6B6B : 0xFF999999));
+        if (battPct < 0) {
+            vBatt.setText("");
+            vBattIcon.set(-1, 0xFF999999);
+            return;
+        }
+        // Charging is carried by colour rather than a bolt: the vendor icon
+        // set has no bolt, and this build's font is missing one too.
+        int c = battCharging ? 0xFF7FB3FF
+                : (battPct <= LOW_BATTERY_PCT ? 0xFFFF6B6B : 0xFF999999);
+        vBatt.setText(battPct + "%");
+        vBatt.setTextColor(c);
+        vBattIcon.set(battPct, c);
     }
 
     private void renderNow() {

@@ -196,18 +196,32 @@ A one-line bar sits across the top of **every** screen — now playing, menu and
 Bluetooth alike — with the clock on the left and the battery on the right:
 
 ```
-10:42                    84%
+10:42                          84% [|||]
 ```
 
 The clock follows the system 12/24-hour setting (`DateFormat.getTimeFormat`)
-and reticks every second along with the rest of the UI.
+and reticks every second along with the rest of the UI. It is set in the same
+22px as the battery percentage beside it, sized so the digits stand as tall as
+the battery glyph.
 
-The battery is read from the sticky `ACTION_BATTERY_CHANGED` broadcast, not
-`BatteryManager.getIntProperty()` — that only landed in API 21 and this watch
-is 19. Registering for the same broadcast means the reading is pushed on change
-rather than polled. It needs no permission.
+The battery level is read from the sticky `ACTION_BATTERY_CHANGED` broadcast,
+not `BatteryManager.getIntProperty()` — that only landed in API 21 and this
+watch is 19. Registering for the same broadcast means the reading is pushed on
+change rather than polled. It needs no permission.
 
-A charging watch shows a trailing `+` and turns blue; at or below 15% the
-percentage turns red. The `+` is deliberately not a bolt glyph, for the same
-reason the volume bar is drawn rather than typed: this build's font is missing
-most of the symbol range.
+### The glyph
+
+`BatteryIcon` redraws the stock launcher's own battery icon, so the player
+shows the same symbol the rest of the watch does. The geometry is measured
+from `L004Launcher.apk`'s `ic_battery_bg` set at ldpi (a 36×36 canvas): a
+rounded body with the terminal nub on the **left**, and five discrete fill bars
+that accumulate from the **right**-hand end. Both are the vendor's quirks and
+both are kept.
+
+It is redrawn rather than copied for two reasons: the originals are vendor
+assets and this repo is GPL, and they are near-black — drawn for the launcher's
+light background, so they would be invisible on this app's black one.
+
+Charging is carried by colour rather than a bolt, since the vendor set has no
+bolt and this build's font is missing one too: charging turns the percentage
+and the glyph blue, and at or below 15% both turn red.
