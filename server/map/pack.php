@@ -59,16 +59,17 @@ $span = 1 << $z;
  * first time, so nothing already rendered is thrown away.
  */
 $aligned = ($w === 16 && $h === 16 && ($x % 16) === 0 && ($y % 16) === 0);
-$blockFile = $aligned
-    ? TILE_DIR . "/$c/b$z/" . ($x >> 4) . '_' . ($y >> 4) . '.wpk'
-    : null;
 
-if ($blockFile !== null && is_file($blockFile)) {
-    $body = file_get_contents($blockFile);
-    send($body);
+if ($aligned) {
+    // The common case, and the only one the watch asks for: hand it straight
+    // to the shared block builder, which caches.
+    send(block_bytes($c, $z, $x >> 4, $y >> 4));
     exit;
 }
 
+// An unaligned or partial request - by hand, or from an older build. Rendered
+// but not cached, since it does not correspond to a stored block.
+$span = 1 << $z;
 $parts = [];
 $count = 0;
 
@@ -77,17 +78,7 @@ for ($i = 0; $i < $w; $i++) {
         $tx = $x + $i;
         $ty = $y + $j;
         if ($tx < 0 || $ty < 0 || $tx >= $span || $ty >= $span) { continue; }
-
-        // The old per-tile cache is still read where it exists, so nothing
-        // already rendered is thrown away - but nothing new is written to it.
-        // Blocks are the unit now, and the block file written at the end of
-        // this request is what the next one will be served from. A per-tile
-        // cache alongside it would be a second copy of the same pixels, at
-        // 4kB of filesystem per 515-byte tile, encrypted on the way out.
-        $cacheFile = TILE_DIR . "/$c/$z/$tx/$ty.png";
-        $png = is_file($cacheFile)
-            ? file_get_contents($cacheFile)
-            : render_tile($c, $z, $tx, $ty);
+        $png = render_tile($c, $z, $tx, $ty);
         $parts[] = pack('NNN', $tx, $ty, strlen($png)) . $png;
         $count++;
     }

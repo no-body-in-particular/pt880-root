@@ -39,8 +39,8 @@ $total = ($x1 - $x0 + 1) * ($y1 - $y0 + 1);
 if ($shards > 1) {
     $total = (int) ceil($total / $shards);
 }
-fwrite(STDERR, sprintf("%s z%d shard %d/%d: x %d..%d  y %d..%d  = ~%d tiles\n",
-    $country, $z, $shard, $shards, $x0, $x1, $y0, $y1, $total));
+fwrite(STDERR, sprintf("%s z%d shard %d/%d: x %d..%d  y %d..%d\n",
+    $country, $z, $shard, $shards, $x0, $x1, $y0, $y1));
 
 /** Is the web server serving anything at this moment? */
 function busy(): bool {
@@ -49,8 +49,15 @@ function busy(): bool {
 }
 
 $done = 0; $made = 0; $t0 = microtime(true);
-for ($x = $x0; $x <= $x1; $x++) {
-    if ($shards > 1 && ($x % $shards) !== $shard) { continue; }
+
+// Block coordinates, since a block is the unit that is stored and served.
+$bx0 = $x0 >> 4; $bx1 = $x1 >> 4;
+$by0 = $y0 >> 4; $by1 = $y1 >> 4;
+$total = ($bx1 - $bx0 + 1) * ($by1 - $by0 + 1);
+if ($shards > 1) { $total = (int) ceil($total / $shards); }
+
+for ($bx = $bx0; $bx <= $bx1; $bx++) {
+    if ($shards > 1 && ($bx % $shards) !== $shard) { continue; }
 
     // Yield to the watch.
     //
@@ -62,23 +69,21 @@ for ($x = $x0; $x <= $x1; $x++) {
     // already queued behind a render that has started. So: if anything is
     // being served right now, wait for it to finish.
     $waited = 0;
-    while (busy() && $waited < 60) { usleep(250000); $waited++; }
+    while (busy() && $waited < 120) { usleep(250000); $waited++; }
 
-    for ($y = $y0; $y <= $y1; $y++) {
+    for ($by = $by0; $by <= $by1; $by++) {
         $done++;
-        $f = TILE_DIR . "/$country/$z/$x/$y.png";
-        if (is_file($f)) { continue; }
-        $png = render_tile($country, $z, $x, $y);
-        @mkdir(dirname($f), 0755, true);
-        @file_put_contents($f, $png);
+        if (is_file(block_file($country, $z, $bx, $by))) { continue; }
+        block_bytes($country, $z, $bx, $by);
         $made++;
+        if (($made % 5) === 0) {
+            $el = microtime(true) - $t0;
+            fwrite(STDERR, sprintf("\r[%d] %d/%d blocks walked, %d built, %.0fs, %.0f min left   ",
+                $shard, $done, $total, $made, $el,
+                $made ? ($el / $made) * max(0, $total - $done) / 60 : 0));
+        }
     }
-    $el = microtime(true) - $t0;
-    // Remaining time from the render rate, not the walk rate: most tiles are
-    // already cached and cost a stat, so counting those makes the estimate
-    // wildly optimistic and then wildly pessimistic.
-    $rate = $made > 0 ? $el / $made : 0;
-    fwrite(STDERR, sprintf("\r[%d] %d/%d walked, %d rendered, %.0fs elapsed   ",
-        $shard, $done, $total, $made, $el));
 }
-fwrite(STDERR, sprintf("\ndone: %d rendered in %.0fs\n", $made, microtime(true) - $t0));
+
+fwrite(STDERR, sprintf("\ndone: %d blocks built in %.0f min\n",
+    $made, (microtime(true) - $t0) / 60));

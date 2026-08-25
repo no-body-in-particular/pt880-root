@@ -53,51 +53,128 @@ const CELL_DEG  = 0.01;
  * Index is the "grey" column of road_classes(), so that table needs no edit.
  */
 function palette(): array {
+    // A test harness can substitute a palette to measure what a different
+    // bit depth costs; nothing in normal operation sets this.
+    if (isset($GLOBALS['PALETTE_OVERRIDE'])) { return $GLOBALS['PALETTE_OVERRIDE']; }
+
+    /*
+     * Thirty-two colours, which makes these 8-bit palette PNGs rather than
+     * 4-bit ones.
+     *
+     * PNG has no 5-bit depth - the choices are 1, 2, 4 and 8 - so going past
+     * sixteen colours doubles the raw pixel data. Measured over a spread of
+     * terrain it costs 6%: a dense city tile grows 2%, an empty one 41% but
+     * only from 192 to 270 bytes, and a country goes from about 42MB to 44.
+     * That is a fair price for being able to tell a forest from a field.
+     *
+     * Two groups. Ground cover in 1..15, drawn first and dark, because it is
+     * context and must never compete with what is drawn on top of it. Roads
+     * in 16..27, brightening with importance, all in the cool half of the
+     * wheel so the amber route line the watch draws stays unmistakable.
+     */
     return [
         0  => [0x08, 0x0B, 0x10],   // background
-        1  => [0x0E, 0x1B, 0x26],   // water, once there is any
-        2  => [0x0E, 0x1F, 0x14],   // park
-        3  => [0x16, 0x1A, 0x20],   // built-up fill
-        4  => [0x3F, 0x4A, 0x44],   // footway, path, steps
-        5  => [0x4A, 0x51, 0x58],   // service, track
-        6  => [0x4E, 0x6B, 0x52],   // cycleway, pedestrian - green: not for cars
-        7  => [0x66, 0x6E, 0x78],   // living street
-        8  => [0x7E, 0x87, 0x94],   // residential, unclassified
-        9  => [0x8E, 0x99, 0xA6],   // tertiary link
-        10 => [0x9E, 0xAA, 0xB8],   // tertiary, secondary link
-        11 => [0xB0, 0xBE, 0xCE],   // secondary
-        12 => [0x7F, 0xA8, 0xD8],   // trunk link   - blue marks a through road
-        13 => [0x93, 0xBE, 0xEA],   // primary, motorway link
-        14 => [0xA9, 0xD2, 0xF5],   // trunk
-        15 => [0xC8, 0xE8, 0xFF],   // motorway
+        1  => [0x0D, 0x1A, 0x26],   // water
+        2  => [0x11, 0x22, 0x30],   // river, canal, stream
+        3  => [0x16, 0x1A, 0x20],   // building
+        4  => [0x0D, 0x21, 0x14],   // forest
+        5  => [0x12, 0x29, 0x1A],   // park, nature reserve, recreation
+        6  => [0x17, 0x31, 0x1F],   // grass, meadow, heath, scrub
+        7  => [0x1E, 0x24, 0x13],   // farmland, orchard, allotment
+        8  => [0x1C, 0x1C, 0x22],   // industrial, commercial, retail
+        9  => [0x13, 0x15, 0x1A],   // residential landuse
+        10 => [0x1A, 0x23, 0x18],   // cemetery
+        11 => [0x2A, 0x28, 0x1E],   // beach, sand, dune
+        12 => [0x0F, 0x22, 0x26],   // wetland, marsh
+        13 => [0x24, 0x1E, 0x24],   // quarry, military, landfill
+        14 => [0x36, 0x3B, 0x45],   // railway
+        15 => [0x20, 0x20, 0x20],   // spare
+        16 => [0x3F, 0x4A, 0x44],   // footway, path, steps
+        17 => [0x4A, 0x51, 0x58],   // service, track
+        18 => [0x4E, 0x6B, 0x52],   // cycleway, pedestrian - not for cars
+        19 => [0x66, 0x6E, 0x78],   // living street
+        20 => [0x7E, 0x87, 0x94],   // residential, unclassified
+        21 => [0x8E, 0x99, 0xA6],   // tertiary link
+        22 => [0x9E, 0xAA, 0xB8],   // tertiary, secondary link
+        23 => [0xB0, 0xBE, 0xCE],   // secondary
+        24 => [0x7F, 0xA8, 0xD8],   // trunk link - blue marks a through road
+        25 => [0x93, 0xBE, 0xEA],   // primary, motorway link
+        26 => [0xA9, 0xD2, 0xF5],   // trunk
+        27 => [0xC8, 0xE8, 0xFF],   // motorway
+        28 => [0x30, 0x30, 0x30],   // spare
+        29 => [0x30, 0x30, 0x30],
+        30 => [0x30, 0x30, 0x30],
+        31 => [0x30, 0x30, 0x30],
+    ];
+}
+
+/**
+ * Ground cover class to palette index.
+ *
+ * Everything not named here is left undrawn rather than guessed at: an
+ * unrecognised landuse painted a default colour is worse than bare
+ * background, because it reads as a real feature.
+ */
+function area_classes(): array {
+    return [
+        'forest' => 4, 'wood' => 4,
+        'park' => 5, 'nature_reserve' => 5, 'recreation_ground' => 5,
+        'village_green' => 5, 'garden' => 5,
+        'grass' => 6, 'meadow' => 6, 'heath' => 6, 'scrub' => 6,
+        'grassland' => 6, 'moor' => 6,
+        'farmland' => 7, 'farmyard' => 7, 'orchard' => 7, 'vineyard' => 7,
+        'allotments' => 7,
+        'industrial' => 8, 'commercial' => 8, 'retail' => 8,
+        'cemetery' => 10, 'graveyard' => 10,
+        'residential' => 9,
+        'beach' => 11, 'sand' => 11, 'dune' => 11,
+        'wetland' => 12, 'marsh' => 12, 'mud' => 12,
+        'quarry' => 13, 'military' => 13, 'landfill' => 13,
+        'water' => 1, 'reservoir' => 1, 'basin' => 1, 'lake' => 1,
+        'pond' => 1, 'dock' => 1, 'wastewater' => 1,
+        'river' => 2, 'canal' => 2, 'stream' => 2, 'drain' => 2,
     ];
 }
 
 function road_classes(): array {
     return [
-        // fclass                     => [code, width, grey, minzoom]
-        'motorway'                    => [1, 3, 15, 7],
-        'motorway_link'               => [1, 2, 13, 11],
-        'trunk'                       => [2, 3, 14, 7],
-        'trunk_link'                  => [2, 2, 12, 11],
-        'primary'                     => [3, 2, 13, 8],
-        'primary_link'                => [3, 2, 11, 12],
-        'secondary'                   => [4, 2, 11, 10],
-        'secondary_link'              => [4, 1, 10, 12],
-        'tertiary'                    => [5, 2, 10, 11],
-        'tertiary_link'               => [5, 1,  9, 13],
-        'unclassified'                => [6, 1,  8, 13],
-        'residential'                 => [6, 1,  8, 13],
-        'living_street'               => [6, 1,  7, 14],
-        'pedestrian'                  => [7, 1,  6, 14],
-        'service'                     => [8, 1,  5, 15],
-        'track'                       => [8, 1,  5, 15],
-        'cycleway'                    => [9, 1,  6, 14],
-        'footway'                     => [10, 1, 4, 16],
-        'path'                        => [10, 1, 4, 16],
-        'steps'                       => [10, 1, 4, 16],
-        'bridleway'                   => [10, 1, 4, 16],
-        'unknown'                     => [6, 1,  6, 14],
+        // fclass                     => [code, width, colour, minzoom]
+        'motorway'                    => [1, 3, 27, 7],
+        'motorway_link'               => [1, 2, 25, 11],
+        'trunk'                       => [2, 3, 26, 7],
+        'trunk_link'                  => [2, 2, 24, 11],
+        'primary'                     => [3, 2, 25, 8],
+        'primary_link'                => [3, 2, 23, 12],
+        'secondary'                   => [4, 2, 23, 10],
+        'secondary_link'              => [4, 1, 22, 12],
+        'tertiary'                    => [5, 2, 22, 11],
+        'tertiary_link'               => [5, 1,  21, 13],
+        'unclassified'                => [6, 1,  20, 13],
+        'residential'                 => [6, 1,  20, 13],
+        'living_street'               => [6, 1,  19, 14],
+        'pedestrian'                  => [7, 1,  18, 14],
+        'service'                     => [8, 1,  17, 15],
+        'track'                       => [8, 1,  17, 15],
+        'cycleway'                    => [9, 1,  18, 14],
+        'footway'                     => [10, 1, 16, 16],
+        'path'                        => [10, 1, 16, 16],
+        'steps'                       => [10, 1, 16, 16],
+        'bridleway'                   => [10, 1, 16, 16],
+        'unknown'                     => [6, 1,  18, 14],
+
+        // Not roads, but the same shape of thing: a line with a class and a
+        // width. Given codes above every road so they are drawn underneath -
+        // see the sort in render_tile - and their own palette entries.
+        'rail'                        => [11, 1, 14, 11],
+        'light_rail'                  => [11, 1, 14, 12],
+        'subway'                      => [11, 1, 14, 13],
+        'tram'                        => [11, 1, 14, 13],
+        'narrow_gauge'                => [11, 1, 14, 13],
+        'river'                       => [12, 2,  2, 10],
+        'canal'                       => [12, 2,  2, 11],
+        'stream'                      => [12, 1,  2, 13],
+        'drain'                       => [12, 1,  2, 14],
+        'ditch'                       => [12, 1,  2, 15],
     ];
 }
 
@@ -205,6 +282,63 @@ function segments_in(SQLite3 $db, float $w, float $s, float $e, float $n,
 }
 
 /** int32 lon, int32 lat, then int16 delta pairs. */
+function cells_for(array $pts): array {
+    $seen = [];
+    foreach ($pts as $pt) {
+        $seen[((int) floor($pt[0] / CELL_DEG)) . ',' . ((int) floor($pt[1] / CELL_DEG))] = true;
+    }
+    $out = [];
+    foreach (array_keys($seen) as $k) {
+        [$x, $y] = explode(',', $k);
+        $out[] = [(int) $x, (int) $y];
+    }
+    return $out;
+}
+function simplify(array $pts, float $tolM): array {
+    $n = count($pts);
+    if ($n < 3) { return $pts; }
+
+    $lat = $pts[0][1];
+    $kx = 111320.0 * cos(deg2rad($lat));
+    $ky = 110540.0;
+
+    $keep = array_fill(0, $n, false);
+    $keep[0] = true;
+    $keep[$n - 1] = true;
+    $stack = [[0, $n - 1]];
+
+    while ($stack) {
+        [$i, $j] = array_pop($stack);
+        if ($j <= $i + 1) { continue; }
+        $ax = $pts[$i][0] * $kx; $ay = $pts[$i][1] * $ky;
+        $bx = $pts[$j][0] * $kx; $by = $pts[$j][1] * $ky;
+        $dx = $bx - $ax; $dy = $by - $ay;
+        $len = $dx * $dx + $dy * $dy;
+
+        $worst = 0.0; $wi = -1;
+        for ($k = $i + 1; $k < $j; $k++) {
+            $px = $pts[$k][0] * $kx - $ax;
+            $py = $pts[$k][1] * $ky - $ay;
+            if ($len > 0) {
+                $t = max(0.0, min(1.0, ($px * $dx + $py * $dy) / $len));
+                $d = hypot($px - $t * $dx, $py - $t * $dy);
+            } else {
+                $d = hypot($px, $py);
+            }
+            if ($d > $worst) { $worst = $d; $wi = $k; }
+        }
+        if ($worst > $tolM && $wi > 0) {
+            $keep[$wi] = true;
+            $stack[] = [$i, $wi];
+            $stack[] = [$wi, $j];
+        }
+    }
+
+    $out = [];
+    for ($i = 0; $i < $n; $i++) { if ($keep[$i]) { $out[] = $pts[$i]; } }
+    return $out;
+}
+
 function pack_geom(array $pts): string {
     $first = $pts[0];
     $s = pack('ll', (int) round($first[0] * 1e7), (int) round($first[1] * 1e7));
@@ -318,16 +452,122 @@ function bldg_cell(SQLite3 $db, int $cx, int $cy): array {
     return $list;
 }
 
-/** Does this store have building footprints? Older ones do not. */
-function has_buildings(SQLite3 $db): bool {
+/**
+ * Ground cover overlapping a bounding box, in drawing order.
+ *
+ * Two tables. Most polygons are filed by the cells they touch, as roads are.
+ * The few that span more than a couple of dozen cells - a large lake, a
+ * national park - are held once and found by bounding box instead, because
+ * copying one of those into every cell it covers is how a road database
+ * becomes a hundred gigabytes.
+ */
+function areas_in(SQLite3 $db, float $w, float $s, float $e, float $n): array {
+    $out = [];
+
+    $cx0 = (int) floor($w / CELL_DEG); $cx1 = (int) floor($e / CELL_DEG);
+    $cy0 = (int) floor($s / CELL_DEG); $cy1 = (int) floor($n / CELL_DEG);
+    $st = $db->prepare('SELECT cls, geom FROM area
+                        WHERE cx BETWEEN ? AND ? AND cy BETWEEN ? AND ?');
+    $st->bindValue(1, $cx0, SQLITE3_INTEGER); $st->bindValue(2, $cx1, SQLITE3_INTEGER);
+    $st->bindValue(3, $cy0, SQLITE3_INTEGER); $st->bindValue(4, $cy1, SQLITE3_INTEGER);
+    $r = $st->execute();
+    $seen = [];
+    while ($row = $r->fetchArray(SQLITE3_ASSOC)) {
+        // A polygon spanning several cells comes back once per cell.
+        $k = crc32($row['geom']);
+        if (isset($seen[$k])) { continue; }
+        $seen[$k] = true;
+        $out[] = [$row['cls'], unpack_geom($row['geom'])];
+    }
+
+    $st = $db->prepare('SELECT cls, geom FROM bigarea
+                        WHERE minx <= ? AND maxx >= ? AND miny <= ? AND maxy >= ?');
+    $st->bindValue(1, $e); $st->bindValue(2, $w);
+    $st->bindValue(3, $n); $st->bindValue(4, $s);
+    $r = $st->execute();
+    while ($row = $r->fetchArray(SQLITE3_ASSOC)) {
+        $out[] = [$row['cls'], unpack_geom($row['geom'])];
+    }
+
+    // Water over land, so a lake inside a wood is drawn as a lake; otherwise
+    // the order polygons happen to arrive in decides what you see.
+    usort($out, function ($a, $b) {
+        $rank = function ($c) { return ($c === 1 || $c === 2) ? 1 : 0; };
+        return $rank($a[0]) <=> $rank($b[0]);
+    });
+    return $out;
+}
+
+/** Does this store have ground cover? Older ones do not. */
+function has_areas(SQLite3 $db): bool {
+    return table_exists($db, 'area');
+}
+
+function table_exists(SQLite3 $db, string $name): bool {
     static $seen = [];
-    $key = spl_object_hash($db);
+    $key = spl_object_hash($db) . '/' . $name;
     if (!isset($seen[$key])) {
         $r = @$db->querySingle("SELECT name FROM sqlite_master
-                                WHERE type='table' AND name='bldg'");
+                                WHERE type='table' AND name='" . $name . "'");
         $seen[$key] = ($r !== null && $r !== false);
     }
     return $seen[$key];
+}
+
+/** Does this store have building footprints? Older ones do not. */
+function has_buildings(SQLite3 $db): bool {
+    return table_exists($db, 'bldg');
+}
+
+/** Where a block's assembled bytes are cached. */
+function block_file(string $country, int $z, int $bx, int $by): string {
+    return TILE_DIR . "/$country/b$z/{$bx}_{$by}.wpk";
+}
+
+/**
+ * One 16x16 block, assembled and cached.
+ *
+ * The single place a block is built, so the warmer and the live request
+ * cannot drift apart in what they produce - which they did when warming
+ * still wrote per-tile files nothing read any more.
+ *
+ *     "WPK1"  u8 zoom  u32 count
+ *     per tile:  u32 x  u32 y  u32 length  bytes
+ */
+function block_bytes(string $country, int $z, int $bx, int $by): string {
+    $f = block_file($country, $z, $bx, $by);
+    if (is_file($f)) {
+        $b = file_get_contents($f);
+        if ($b !== false && strlen($b) > 9) { return $b; }
+    }
+
+    $span = 1 << $z;
+    $x0 = $bx << 4;
+    $y0 = $by << 4;
+    $parts = '';
+    $count = 0;
+    for ($i = 0; $i < 16; $i++) {
+        for ($j = 0; $j < 16; $j++) {
+            $tx = $x0 + $i;
+            $ty = $y0 + $j;
+            if ($tx < 0 || $ty < 0 || $tx >= $span || $ty >= $span) { continue; }
+            $png = render_tile($country, $z, $tx, $ty);
+            $parts .= pack('NNN', $tx, $ty, strlen($png)) . $png;
+            $count++;
+        }
+    }
+    $body = 'WPK1' . pack('C', $z) . pack('N', $count) . $parts;
+
+    @mkdir(dirname($f), 0755, true);
+    // Written under a temporary name and moved, so a request arriving while
+    // this one is still writing cannot read a half block.
+    $tmp = $f . '.' . getmypid();
+    if (@file_put_contents($tmp, $body) === strlen($body)) {
+        @rename($tmp, $f);
+    } else {
+        @unlink($tmp);
+    }
+    return $body;
 }
 
 function render_tile(string $country, int $z, int $x, int $y): string {
@@ -351,6 +591,22 @@ function render_tile(string $country, int $z, int $x, int $y): string {
 
     $classes = [];
     foreach (road_classes() as $spec) { $classes[$spec[0]] = $spec; }
+
+    // Ground cover under everything else, from z12 up. Below that a wood is
+    // a smudge and the shape of the coast is all that reads.
+    if ($z >= 12 && has_areas($db)) {
+        foreach (areas_in($db, $w - $mw, $s - $mh, $e + $mw, $n + $mh) as [$cls, $pts]) {
+            $poly = [];
+            foreach ($pts as $pt) {
+                $poly[] = (int) ((lon_to_tile($pt[0], $z) - $x) * TILE_PX);
+                $poly[] = (int) ((lat_to_tile($pt[1], $z) - $y) * TILE_PX);
+            }
+            if (count($poly) >= 6) {
+                imagefilledpolygon($im, $poly, count($poly) >> 1,
+                        $grey[max(1, min(15, $cls))]);
+            }
+        }
+    }
 
     // Buildings first, under everything. They are context, not detail: at
     // z15 a house is two or three pixels, so what they give is the texture of
@@ -385,7 +641,7 @@ function render_tile(string $country, int $z, int $x, int $y): string {
     foreach ($segs as $seg) {
         $spec = $classes[$seg['cls']] ?? [6, 1, 8, 13];
         imagesetthickness($im, $spec[1]);
-        $col = $grey[max(1, min(15, $spec[2]))];
+        $col = $grey[max(1, min(31, $spec[2]))];
 
         $pts = $seg['pts'];
         $px = null; $py = null;

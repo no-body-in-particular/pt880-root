@@ -2,7 +2,7 @@
 /**
  * Turn a Geofabrik roads shapefile into the watch's road store.
  *
- *     php import.php netherlands data/nl/gis_osm_roads_free_1
+ *     php import.php netherlands data/$country/gis_osm_roads_free_1
  *
  * Geofabrik's "free" shapefile extract is used rather than the .osm.pbf
  * because the roads are already separated out and a shapefile is a documented
@@ -188,64 +188,4 @@ printf("%s: %d ways, %d rows, bbox %.4f %.4f %.4f %.4f, %.0f MB\n",
 
 // ---------------------------------------------------------------- helpers
 
-/** Every grid cell a way passes through, walked along its segments so a long
- *  way does not miss the cells between its ends. */
-function cells_for(array $pts): array {
-    $seen = [];
-    foreach ($pts as $pt) {
-        $seen[((int) floor($pt[0] / CELL_DEG)) . ',' . ((int) floor($pt[1] / CELL_DEG))] = true;
-    }
-    $out = [];
-    foreach (array_keys($seen) as $k) {
-        [$x, $y] = explode(',', $k);
-        $out[] = [(int) $x, (int) $y];
-    }
-    return $out;
-}
 
-/** Douglas-Peucker, tolerance in metres. Iterative: a way with thousands of
- *  points would blow the stack recursively. */
-function simplify(array $pts, float $tolM): array {
-    $n = count($pts);
-    if ($n < 3) { return $pts; }
-
-    $lat = $pts[0][1];
-    $kx = 111320.0 * cos(deg2rad($lat));
-    $ky = 110540.0;
-
-    $keep = array_fill(0, $n, false);
-    $keep[0] = true;
-    $keep[$n - 1] = true;
-    $stack = [[0, $n - 1]];
-
-    while ($stack) {
-        [$i, $j] = array_pop($stack);
-        if ($j <= $i + 1) { continue; }
-        $ax = $pts[$i][0] * $kx; $ay = $pts[$i][1] * $ky;
-        $bx = $pts[$j][0] * $kx; $by = $pts[$j][1] * $ky;
-        $dx = $bx - $ax; $dy = $by - $ay;
-        $len = $dx * $dx + $dy * $dy;
-
-        $worst = 0.0; $wi = -1;
-        for ($k = $i + 1; $k < $j; $k++) {
-            $px = $pts[$k][0] * $kx - $ax;
-            $py = $pts[$k][1] * $ky - $ay;
-            if ($len > 0) {
-                $t = max(0.0, min(1.0, ($px * $dx + $py * $dy) / $len));
-                $d = hypot($px - $t * $dx, $py - $t * $dy);
-            } else {
-                $d = hypot($px, $py);
-            }
-            if ($d > $worst) { $worst = $d; $wi = $k; }
-        }
-        if ($worst > $tolM && $wi > 0) {
-            $keep[$wi] = true;
-            $stack[] = [$i, $wi];
-            $stack[] = [$wi, $j];
-        }
-    }
-
-    $out = [];
-    for ($i = 0; $i < $n; $i++) { if ($keep[$i]) { $out[] = $pts[$i]; } }
-    return $out;
-}

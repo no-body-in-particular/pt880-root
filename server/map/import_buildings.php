@@ -2,7 +2,7 @@
 /**
  * Building footprints into the road store.
  *
- *     php import_buildings.php netherlands data/nl/gis_osm_buildings_a_free_1.shp
+ *     php import_buildings.php netherlands data/$country/gis_osm_buildings_a_free_1.shp
  *
  * Three decisions, all forced by the screen this ends up on.
  *
@@ -26,7 +26,7 @@ require_once __DIR__ . '/lib.php';
 ini_set('memory_limit', '2G');
 
 $country = $argv[1] ?? 'netherlands';
-$shpPath = $argv[2] ?? (DATA_DIR . '/nl/gis_osm_buildings_a_free_1.shp');
+$shpPath = $argv[2] ?? (DATA_DIR . "/$country/gis_osm_buildings_a_free_1.shp");
 
 /** Square metres below which a building is not worth a pixel. */
 const MIN_AREA_M2 = 40.0;
