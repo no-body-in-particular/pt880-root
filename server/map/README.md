@@ -5,6 +5,37 @@ What the watch talks to. Renders road tiles and serves them in blocks.
 Deployed at `/var/www/hiawatha/map/`; the watch reaches it as
 `https://coredump.ws/map/`, set per-device in `/sdcard/Documents/map.txt`.
 
+## Adding a country
+
+    ./build_country.sh germany europe/germany
+    ./warm.sh germany 15
+
+Downloads from Geofabrik, extracts only the layers that are drawn, and
+imports roads, ground cover, buildings, railways and waterways. Nothing in
+the pipeline is specific to any one country: the watch asks country.php which
+map covers its position, and country.php lists every .db in data/.
+
+## Layers
+
+| | drawn as |
+|---|---|
+| roads | twelve widths and colours by importance, brightest for motorway |
+| buildings | bounding boxes, filled |
+| landuse, natural | forest, park, grass, farmland, industrial, sand, wetland |
+| water areas | lakes, docks, wide rivers |
+| waterways | rivers, canals and streams, as lines |
+| railways | one colour, under the roads |
+
+Tiles are 8-bit palette PNGs with a 32-colour palette. PNG has no 5-bit depth
+- 1, 2, 4 and 8 are the choices - so going past sixteen colours doubles the
+raw pixel data, which measured over a spread of terrain costs 6%: a dense
+city tile grows 2%, an empty one 41% but only from 192 to 270 bytes. A
+country goes from about 42MB to 44. That buys telling a forest from a field.
+
+Ground cover occupies palette 1..15 and stays dark, because it is context and
+must never compete with the route. Roads keep 16..27 and the cool half of the
+wheel, so the amber route line the watch draws on top is unmistakable.
+
 ## Endpoints
 
 | | |
@@ -19,7 +50,11 @@ Deployed at `/var/www/hiawatha/map/`; the watch reaches it as
 
 | | |
 |---|---|
-| `import.php` | Geofabrik roads shapefile into SQLite |
+| `build_country.sh` | the whole pipeline for a new country, from download |
+| `import.php` | roads shapefile into SQLite |
+| `import_areas.php` | landuse, water and natural polygons |
+| `import_buildings.php` | building footprints, as bounding boxes |
+| `import_lines.php` | railways and waterways |
 | `warm.php` / `warm.sh` | render a country ahead of time, sharded, yielding to live requests |
 | `convert.php` | repack an old per-tile cache into block files |
 
