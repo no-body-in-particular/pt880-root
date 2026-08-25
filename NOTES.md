@@ -158,6 +158,34 @@ from stock. Its contents no longer matter, but the structure does.
   stock's offset changed nothing. Not the cause.
 - **`WRITE_LIMIT = 0xa41000`.** Never real — an artifact of measuring a write
   that was failing for an unrelated reason.
+- **Bluetooth Low Energy keyboards and mice.** This build has a working Classic
+  HID host and no HID-over-GATT, and it cannot bond an LE device at all:
+  `createBond()` fails identically over both transports with a HAL status AOSP
+  has no name for, which surfaces as `UNBOND_REASON_REMOVED` (9) and reads as
+  though something deleted the pairing. Nothing did.
+
+  Being your own HOGP host is a real idea and it gets further than expected —
+  API 19 has a full GATT client, `connectGatt()` succeeds, and boot protocol
+  means the report map never has to be parsed. It gets no further than service
+  discovery: the device wants an encrypted link, the stack cannot make one, and
+  the connection drops with `133`. After that the stack stays wedged and every
+  subsequent connect times out until Bluetooth is cycled.
+
+  So: **Classic peripherals work here, LE ones do not.** Tell them apart with
+  `BluetoothDevice.getType()`, which is authoritative, and not by the address —
+  BR/EDR addresses are always public so a random one does suggest LE, but cheap
+  peripherals ship unregistered MACs routinely and an i35 earbud would have
+  matched that test. It is Classic: it reports a Class of Device, a field with
+  no LE equivalent.
+
+  The diagnosis cost an evening mostly through self-inflicted wounds, all of
+  them fixed and all worth knowing about:
+  `cancelPairingUserInput()` calls `cancelBondProcess()` and cancels the bond
+  rather than the dialog; `createBond()` on the line after `cancelDiscovery()`
+  races an inquiry that is still running and fails in 30 ms with no pairing
+  request; and GATT callbacks arrive on binder threads, so a listener that
+  redraws a view from them takes the process down silently — which on a watch
+  whose launcher *is* the app looks like the screen going home for no reason.
 
 ---
 
