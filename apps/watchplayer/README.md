@@ -127,7 +127,10 @@ adb install -r watchplayer.apk
 ```
 
 Requires the Android SDK build-tools and a JDK; paths are set at the top of
-`build.sh`.
+`build.sh`. It runs on both Windows/MSYS and Linux — the SDK ships `.exe`/
+`.bat` wrappers on the former and bare executables on the latter, and the
+script probes for which. Set `ANDROID_SDK_ROOT` if the SDK is not in one of
+the usual places.
 
 ## System files changed
 
@@ -186,3 +189,25 @@ Note that Android 4.4 predates AVRCP absolute volume, so on many cheap TWS buds
 the volume buttons only change the buds' own internal level and the watch never
 sees them. The `AVRCP.kl` additions cover the case where the buds send volume
 as AVRCP passthrough instead.
+
+## Status bar
+
+A one-line bar sits across the top of **every** screen — now playing, menu and
+Bluetooth alike — with the clock on the left and the battery on the right:
+
+```
+10:42                    84%
+```
+
+The clock follows the system 12/24-hour setting (`DateFormat.getTimeFormat`)
+and reticks every second along with the rest of the UI.
+
+The battery is read from the sticky `ACTION_BATTERY_CHANGED` broadcast, not
+`BatteryManager.getIntProperty()` — that only landed in API 21 and this watch
+is 19. Registering for the same broadcast means the reading is pushed on change
+rather than polled. It needs no permission.
+
+A charging watch shows a trailing `+` and turns blue; at or below 15% the
+percentage turns red. The `+` is deliberately not a bolt glyph, for the same
+reason the volume bar is drawn rather than typed: this build's font is missing
+most of the symbol range.

@@ -2,13 +2,16 @@ package org.watchplayer;
 
 import android.app.Activity;
 import android.bluetooth.BluetoothDevice;
+import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.ServiceConnection;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.media.AudioManager;
+import android.os.BatteryManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
@@ -23,7 +26,9 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import java.text.DateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 
 /**
@@ -49,12 +54,21 @@ public class PlayerActivity extends Activity
     /** Auto-repeats seen before a hold counts as the "extra long" gesture. */
     private static final int XLONG_REPEATS = 60;
 
+    /** At or below this the battery readout turns red. */
+    private static final int LOW_BATTERY_PCT = 15;
+
     private MusicService svc;
     private BtHelper bt;
     private AudioManager audio;
     private SharedPreferences prefs;
 
     private final Handler ui = new Handler();
+
+    /** Honours the system 12/24h setting; needs a Context, so set in onCreate. */
+    private DateFormat clockFmt;
+
+    private int battPct = -1;
+    private boolean battCharging = false;
 
     private int screen = SCREEN_NOW;
     private int sel = 0;
@@ -64,6 +78,7 @@ public class PlayerActivity extends Activity
 
     // views
     private TextView vStatus, vTitle, vSub, vVol, vHint;
+    private TextView vClock, vBatt;
     private LinearLayout vList, volBarRow;
     private View volFill, volRest;
     private ScrollView vScroll;
@@ -88,6 +103,8 @@ public class PlayerActivity extends Activity
         twoButtons = prefs.getBoolean("twoButtons", false);
         keepAwake = prefs.getBoolean("keepAwake", false);
 
+        clockFmt = android.text.format.DateFormat.getTimeFormat(this);
+
         audio = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         setVolumeControlStream(AudioManager.STREAM_MUSIC);
 
@@ -105,6 +122,8 @@ public class PlayerActivity extends Activity
     protected void onStart() {
         super.onStart();
         bt.start();
+        readBattery(registerReceiver(battRx,
+                new IntentFilter(Intent.ACTION_BATTERY_CHANGED)));
         ui.post(tick);
 
         // "-e pair <MAC>" pairs a known address without needing it to show up
@@ -123,6 +142,7 @@ public class PlayerActivity extends Activity
     protected void onStop() {
         super.onStop();
         ui.removeCallbacks(tick);
+        try { unregisterReceiver(battRx); } catch (Exception e) { /* not registered */ }
         bt.cancelScan();
     }
 
@@ -159,6 +179,21 @@ public class PlayerActivity extends Activity
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Color.BLACK);
         root.setPadding(6, 6, 6, 4);
+
+        // --- status bar: clock left, battery right. Built onto the root
+        // rather than the now-playing pane so it survives the switch to
+        // the menu and Bluetooth screens.
+        vClock = text(11, 0xFF999999, false);
+        vClock.setGravity(Gravity.LEFT);
+        vBatt = text(11, 0xFF999999, false);
+        vBatt.setGravity(Gravity.RIGHT);
+
+        LinearLayout statusBar = new LinearLayout(this);
+        statusBar.setOrientation(LinearLayout.HORIZONTAL);
+        statusBar.addView(vClock, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        statusBar.addView(vBatt, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
 
         // --- now playing pane
         LinearLayout now = new LinearLayout(this);
@@ -211,6 +246,8 @@ public class PlayerActivity extends Activity
         body.addView(nowPane, lp(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
         body.addView(listPane, lp(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
 
+        root.addView(statusBar, lp(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0));
+        root.addView(spacer(3));
         root.addView(body, lp(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
         root.addView(vHint, lp(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0));
 
@@ -245,6 +282,7 @@ public class PlayerActivity extends Activity
             if (lastVol >= 0 && v != lastVol) volFlashUntil = System.currentTimeMillis() + 2500;
             lastVol = v;
 
+            renderStatusBar();
             if (screen == SCREEN_NOW) render();
             ui.postDelayed(this, 1000);
         }
@@ -258,6 +296,8 @@ public class PlayerActivity extends Activity
     }
 
     private void render() {
+        renderStatusBar();
+
         boolean list = (screen != SCREEN_NOW);
         nowPane.setVisibility(list ? View.GONE : View.VISIBLE);
         listPane.setVisibility(list ? View.VISIBLE : View.GONE);
@@ -267,6 +307,37 @@ public class PlayerActivity extends Activity
         else renderList(btItems(), "Bluetooth");
 
         vHint.setText(hint());
+    }
+
+    /** Sticky ACTION_BATTERY_CHANGED rather than BatteryManager's
+     *  getIntProperty(), which only landed in API 21; this watch is 19. */
+    private final BroadcastReceiver battRx = new BroadcastReceiver() {
+        public void onReceive(Context c, Intent i) { readBattery(i); }
+    };
+
+    private void readBattery(Intent i) {
+        if (i == null) return;
+        int level = i.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
+        int scale = i.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
+        int status = i.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
+        battPct = (level >= 0 && scale > 0) ? (level * 100) / scale : -1;
+        battCharging = (status == BatteryManager.BATTERY_STATUS_CHARGING
+                || status == BatteryManager.BATTERY_STATUS_FULL);
+        renderStatusBar();
+    }
+
+    /** Clock and battery, redrawn from the 1s tick and from battery
+     *  broadcasts. Safe to call before the service binds. */
+    private void renderStatusBar() {
+        if (vClock == null) return;
+        vClock.setText(clockFmt.format(new Date()));
+
+        if (battPct < 0) { vBatt.setText(""); return; }
+        // "+" for charging instead of a bolt: this build's font is missing
+        // most of the symbol range (same reason the volume bar is drawn).
+        vBatt.setText(battPct + "%" + (battCharging ? "+" : ""));
+        vBatt.setTextColor(battCharging ? 0xFF7FB3FF
+                : (battPct <= LOW_BATTERY_PCT ? 0xFFFF6B6B : 0xFF999999));
     }
 
     private void renderNow() {
