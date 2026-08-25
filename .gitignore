@@ -12,3 +12,7 @@ firmware/stock/miscdata.img
 firmware/download/
 __pycache__/
 *.pyc
+
+# Map server: built data and rendered caches, not sources
+server/map/data/
+server/map/tiles/
