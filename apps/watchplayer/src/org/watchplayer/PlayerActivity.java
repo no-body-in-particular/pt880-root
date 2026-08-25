@@ -189,7 +189,9 @@ public class PlayerActivity extends Activity
         // --- status bar: clock left, battery right. Built onto the root
         // rather than the now-playing pane so it survives the switch to
         // the menu and Bluetooth screens.
-        vClock = text(STATUS_PX, 0xFF999999, false);
+        // Blue, the same accent the charging glyph and the Bluetooth
+        // status line use -- the clock reads as a label, not a reading.
+        vClock = text(STATUS_PX, 0xFF7FB3FF, false);
         vClock.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
         vBatt = text(STATUS_PX, 0xFF999999, false);
         vBatt.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);

@@ -202,7 +202,8 @@ Bluetooth alike — with the clock on the left and the battery on the right:
 The clock follows the system 12/24-hour setting (`DateFormat.getTimeFormat`)
 and reticks every second along with the rest of the UI. It is set in the same
 22px as the battery percentage beside it, sized so the digits stand as tall as
-the battery glyph.
+the battery glyph, and drawn in the app's blue accent — the same one the
+Bluetooth status line and the charging glyph use.
 
 The battery level is read from the sticky `ACTION_BATTERY_CHANGED` broadcast,
 not `BatteryManager.getIntProperty()` — that only landed in API 21 and this
