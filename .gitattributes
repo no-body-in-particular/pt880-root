@@ -17,3 +17,7 @@ apps/*/keylayout/** -text
 
 # Product shots and diagrams: never touch these.
 *.png binary
+
+# The vendor database is a fixed-width binary read by offset. Any end-of-line
+# conversion would shift every record past the first CRLF-shaped byte pair.
+*.db binary

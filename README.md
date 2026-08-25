@@ -11,7 +11,8 @@ small square screen, a camera above it, two buttons on the right edge and a
 perforated locking strap">
 
 The two buttons on the right edge are the entire input surface — there is no
-working touchscreen. That shapes everything in [apps/watchplayer](apps/watchplayer).
+working touchscreen. That shapes everything in
+[apps/watchlauncher](apps/watchlauncher).
 
 Read [NOTES.md](NOTES.md) first — it documents the verification chain, every
 patch offset, and the dead ends worth not repeating.
@@ -30,6 +31,8 @@ patch offset, and the dead ends worth not repeating.
 | busybox / htop / nano / dropbear / sshfs installed | working |
 | Bluetooth audio (A2DP) out to headphones | working |
 | Music player running on the watch | working |
+| Launcher, camera, dialler and terminal on the watch | working |
+| Root shell inside an app (setuid helper) | working |
 
 ## Layout
 
@@ -58,12 +61,28 @@ them yourself with `scripts/backup.sh`, which writes them alongside. Nor is
 copy is wrong for any other device, so it is dumped per-device alongside
 `prodnv` and `l_fixnv1`.
 
-`apps/watchplayer/` is a Bluetooth music player for the watch: local files to
-A2DP headphones, driven by the two hardware buttons on a 240×240 screen with no
-touchscreen. It is what the root shell was for. Build it with
-`apps/watchplayer/build.sh` (no Gradle — API 19 fights modern AGP) and read
-[its README](apps/watchplayer/README.md), which documents the firmware's
-distinctly odd key handling.
+### apps/
+
+`apps/watchlauncher/` replaces the stock launcher — a dead-end clock face with
+no app list — and carries five apps inside one APK: **music**, **Bluetooth
+pairing**, **camera**, **calls** and a **root terminal**. One activity, a screen
+stack, and the clock and battery across the top of every screen. It ships a
+57,858-entry IEEE vendor database so a Bluetooth scan names devices that will
+not name themselves, and a 40-line setuid helper (`native/wsu.c`) that gets an
+app a root shell — the adbd patch below does nothing for apps, which are forked
+from zygote rather than from adbd. Read
+[its README](apps/watchlauncher/README.md).
+
+`apps/watchplayer/` is the music player on its own, and is what the root shell
+was originally for: local files to A2DP headphones, driven by the two hardware
+buttons. The launcher supersedes it and contains it; it is kept because it is
+the smaller thing to read, and [its README](apps/watchplayer/README.md)
+documents the firmware's distinctly odd key handling and the keylayout remap
+that **both** apps depend on.
+
+Neither uses Gradle — API 19 fights modern AGP, so `build.sh` drives the SDK
+tools directly. Do not run both at once: they would fight over the headphones'
+media buttons.
 
 ## Requirements
 

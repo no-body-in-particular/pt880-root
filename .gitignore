@@ -6,6 +6,8 @@ apps/*/build/
 apps/*/*.apk
 apps/*/*.idsig
 apps/*/debug.keystore
+apps/*/native/wsu
+apps/*/tools/_oui_cache
 firmware/stock/miscdata.img
 firmware/download/
 __pycache__/

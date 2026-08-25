@@ -291,6 +291,39 @@ option is not a nearby literal and the surrounding bytes did not frame from a
 valid instruction boundary. It is outside the capability path, which is fully
 accounted for by the two sites above, and the one-byte patch does not touch it.
 
+### Root inside an app, which the adbd patch does not give you
+
+The one-byte capbnd patch makes `adb shell` uid 0. It does nothing for an app:
+apps are forked from **zygote**, not from adbd, and zygote has already dropped
+to the app's uid before the app's first instruction runs. Nothing an app can
+call brings that back.
+
+What makes a setuid helper work here is two properties of this build, both
+measured rather than assumed:
+
+- **Android 4.4's zygote never calls `PR_CAPBSET_DROP`.** It sets the app's
+  capabilities with `capset()` alone, so an app process keeps
+  `CapBnd=3fffffffff`. On `execve` a file's permitted set is masked by the
+  bounding set — a full bounding set means a setuid-root binary gets
+  everything. Later Android versions do drop it, and this would not work there.
+- **SELinux is Disabled and `/system` carries no `nosuid`**, so the setuid bit
+  is honoured and no policy objects. The audit in the section above already
+  established there is no `PR_SET_NO_NEW_PRIVS` anywhere in adbd's path either.
+
+`apps/watchlauncher/native/wsu.c` is the whole thing: `setgroups(0,NULL)`,
+`setgid(0)`, `setuid(0)`, exec a shell. Installed 06755 in `/system/xbin` by
+`apps/watchlauncher/install-root-helper.sh`, which needs the
+`build_boot_capbnd.py` image to remount `/system` in the first place — the
+earlier `build_boot_root.py` image has `CapBnd=0xc0` and cannot.
+
+Order matters inside it: `setgroups` and `setgid` must run before `setuid(0)`
+drops the ability to change groups. Getting that backwards is the classic way
+to end up with root's uid and the caller's supplementary groups.
+
+This is an unconditional root escalation for **every** app on the device, not
+just ours. That is the point of it, and it is the reason it belongs on a
+tracker you have taken ownership of and nowhere else.
+
 ### How SuperSU solves the same problem
 
 Recorded because it is the obvious next move if the one-byte patch ever stops
