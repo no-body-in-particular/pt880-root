@@ -35,8 +35,10 @@ this is fully reversible: just use the stock file again.
 import struct
 import sys
 
-SRC = r"C:\wpull\fdl_sl8521e\fdl2-sign.bin"
-DST = r"C:\wpull\fdl_sl8521e\fdl2-patched.bin"
+import paths
+
+SRC = paths.fdl("fdl2-sign.bin")
+DST = paths.fdl("fdl2-patched.bin")
 
 BASE = 0x9efffe00
 TABLE = 0x0554b4

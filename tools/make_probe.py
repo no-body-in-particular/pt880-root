@@ -11,7 +11,9 @@ we still keep every result up to that point, which is why the order matters.
 """
 import os
 
-OUT = r"C:\wpull\dump_watch2"
+import paths
+
+OUT = paths.W2
 BLK = 4096
 
 # 10092544 is the exact size of boot_exact.img, so the largest probe reproduces

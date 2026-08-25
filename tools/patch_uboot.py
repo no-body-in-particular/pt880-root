@@ -16,8 +16,10 @@ so recovery and the bootloader partitions keep their verification.
 import struct
 import sys
 
-SRC = r"C:\wpull\dump_watch2\uboot.img"
-DST = r"C:\wpull\dump_watch2\uboot_unlocked.img"
+import paths
+
+SRC = paths.w2("uboot.img")
+DST = paths.w2("uboot_unlocked.img")
 BASE = 0x9efffe00
 TABLE = 0x04aed0
 BOOT_ENTRY = TABLE + 0x10

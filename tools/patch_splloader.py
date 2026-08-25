@@ -33,8 +33,10 @@ recoverable - that path has been exercised repeatedly today.
 import struct
 import sys
 
-SRC = r"C:\wpull\dump_watch2\splloader.img"
-DST = r"C:\wpull\dump_watch2\splloader_unlocked.img"
+import paths
+
+SRC = paths.w2("splloader.img")
+DST = paths.w2("splloader_unlocked.img")
 
 SITE = 0x005534
 MOVZ_W0_0 = 0x52800000

@@ -25,8 +25,10 @@ Nothing is written to the device - FDL1 lives in SRAM for the session only.
 import struct
 import sys
 
-SRC = r"C:\wpull\fdl_sl8521e\fdl1-sign-STOCK.bin"
-DST = r"C:\wpull\fdl_sl8521e\fdl1-noverify.bin"
+import paths
+
+SRC = paths.fdl("fdl1-sign-STOCK.bin")
+DST = paths.fdl("fdl1-noverify.bin")
 
 SITE = 0x699c
 MOVZ_W0_0 = 0x52800000

@@ -25,12 +25,12 @@ import shutil
 import struct
 import sys
 
-sys.path.insert(0, r"C:\wpull")
+import paths
 from ext4mod import Ext4RW
 
-SRC = r"C:\wpull\dump_watch2\system.img"
-DST = r"C:\wpull\dump_watch2\system_mod.img"
-T = r"C:\wpull\tools_arm"
+SRC = paths.w2("system.img")
+DST = paths.w2("system_mod.img")
+T = paths.TOOLS_ARM
 
 SSH_WRAPPER = """#!/system/bin/sh
 # ssh -> dropbear dbclient

@@ -19,6 +19,8 @@ Paths here are relative to the image root, i.e. /system/xbin on the device is
 import struct
 import sys
 
+import paths
+
 SB_OFF = 1024
 ROOT_INO = 2
 
@@ -179,7 +181,7 @@ class Ext4:
 
 if __name__ == "__main__":
     img = sys.argv[1] if len(sys.argv) > 1 else \
-        r"C:\wpull\dump_watch2\system.img"
+        paths.w2("system.img")
     fs = Ext4(img)
     print("block size %d, %d blocks, %d free, %d groups"
           % (fs.block_size, fs.blocks_count, fs.free_blocks, fs.groups))

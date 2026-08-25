@@ -72,6 +72,21 @@ distinctly odd key handling.
 - A USB cable able to pull the ID pin to GND, to enter boot ROM mode
 - `adb` (platform-tools) for the post-boot steps
 
+### Workspace
+
+The image builders read and write a scratch directory that is deliberately not
+in the repo — partition dumps, stock FDL blobs and the Alpine armhf tree are
+far too big for it. It defaults to `~/wpull`:
+
+    ~/wpull/
+        dump_watch2/    partition images read from and written to the device
+        fdl_sl8521e/    stock and patched FDL1/FDL2 blobs
+        tools_arm/      armhf binaries staged into system.img
+            alpine/     unpacked Alpine rootfs they are taken from
+
+Set `PT880_WORKSPACE` to move all of it at once. `tools/paths.py` is the single
+place this is defined.
+
 ## Quick start
 
 Build the flashing tool once:

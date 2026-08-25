@@ -15,7 +15,6 @@ import struct
 import sys
 import time
 
-sys.path.insert(0, r"C:\wpull")
 from ext4tool import Ext4, ROOT_INO, EXT4_FT_REG
 
 EXT4_EXTENTS_FL = 0x80000

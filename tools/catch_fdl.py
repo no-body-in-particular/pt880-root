@@ -16,7 +16,9 @@ Usage:
 """
 import argparse, datetime, os, subprocess, sys, time
 
-WPULL   = r"C:\wpull"
+import paths
+
+WPULL   = paths.WPULL
 FDLDIR  = os.path.join(WPULL, "fdl_sl8521e")
 FDL1    = os.path.join(FDLDIR, "fdl1-sign.bin")
 FDL2    = os.path.join(FDLDIR, "fdl2-sign.bin")

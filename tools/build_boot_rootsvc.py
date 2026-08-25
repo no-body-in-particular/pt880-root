@@ -37,8 +37,10 @@ import io
 import re
 import sys
 
-STOCK = r"C:\wpull\dump_watch2\boot_stock_exact.img"
-OUT = r"C:\wpull\dump_watch2\boot_rootsvc_fdl.img"
+import paths
+
+STOCK = paths.w2("boot_stock_exact.img")
+OUT = paths.w2("boot_rootsvc_fdl.img")
 
 MOV_R0_0 = 0xE3A00000
 BX_LR = 0xE12FFF1E

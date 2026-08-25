@@ -18,12 +18,13 @@ import os
 import struct
 import sys
 
-sys.path.insert(0, r"C:\wpull")
 from ext4mod import Ext4RW
 from ext4tool import Ext4
 
-IMG = r"C:\wpull\dump_watch2\system_mod.img"
-A = r"C:\wpull\tools_arm\alpine"
+import paths
+
+IMG = paths.w2("system_mod.img")
+A = paths.arm("alpine")
 
 LIBS = [
     ("libfuse3.so.3", "x_fuse3-libs/usr/lib/libfuse3.so.3.16.2"),

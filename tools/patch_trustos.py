@@ -27,8 +27,10 @@ stack are untouched, so the TEE's other services behave exactly as before.
 import struct
 import sys
 
-SRC = r"C:\wpull\dump_watch2\trustos.img"
-DST = r"C:\wpull\dump_watch2\trustos_noverify.img"
+import paths
+
+SRC = paths.w2("trustos.img")
+DST = paths.w2("trustos_noverify.img")
 
 SITE = 0x015da2
 NOP = b"\x00\xbf"        # Thumb-2 NOP

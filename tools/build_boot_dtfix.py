@@ -22,9 +22,11 @@ import struct
 import hashlib
 import sys
 
-STOCK = r"C:\wpull\dump_watch2\boot_stock_exact.img"
-PATCHED = r"C:\wpull\dump_watch2\boot_patched_fdl.img"
-OUT = r"C:\wpull\dump_watch2\boot_dtfix_fdl.img"
+import paths
+
+STOCK = paths.w2("boot_stock_exact.img")
+PATCHED = paths.w2("boot_patched_fdl.img")
+OUT = paths.w2("boot_dtfix_fdl.img")
 
 
 def parse(img):

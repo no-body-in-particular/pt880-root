@@ -7,7 +7,9 @@ instead of just flagging a mismatch.
 import os
 import sys
 
-OUT = r"C:\wpull\dump_watch2"
+import paths
+
+OUT = paths.W2
 BLK = 4096
 NAMES = ["64k", "1m", "4m", "8m", "boot"]
 

@@ -24,11 +24,12 @@ wrappers are neutered, so it is a no-op safety net rather than the main path.
 import struct
 import sys
 
-sys.path.insert(0, r"C:\wpull")
 from ext4mod import Ext4RW
 from ext4tool import Ext4
 
-IMG = r"C:\wpull\dump_watch2\system_mod.img"
+import paths
+
+IMG = paths.w2("system_mod.img")
 
 RC_ADD = r"""
 # ---- added by sl8521e-root ----

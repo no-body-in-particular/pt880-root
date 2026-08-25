@@ -29,7 +29,9 @@ exactly what the partition already holds.
 import os
 import struct
 
-W2 = r"C:\wpull\dump_watch2"
+import paths
+
+W2 = paths.W2
 SRC = os.path.join(W2, "boot.img")            # 24MB raw over-read
 OUT = os.path.join(W2, "boot_stock_exact.img")
 

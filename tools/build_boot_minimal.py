@@ -23,8 +23,10 @@ ro.secure/ro.adb.secure are off, and every byte counts here.
 """
 import struct, gzip, hashlib, io, sys
 
-STOCK = r"C:\wpull\dump_watch2\boot_stock_exact.img"
-OUT = r"C:\wpull\dump_watch2\boot_min_fdl.img"
+import paths
+
+STOCK = paths.w2("boot_stock_exact.img")
+OUT = paths.w2("boot_min_fdl.img")
 
 d = open(STOCK, "rb").read()
 q = d[0x200:]
