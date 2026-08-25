@@ -247,6 +247,89 @@ function unpack_geom(string $b): array {
  * drawn least important first, so a motorway is never buried under the service
  * road that crosses it.
  */
+/**
+ * Building boxes overlapping a bounding box.
+ *
+ * Stored packed by cell - see import_buildings.php - so this is one row per
+ * cell rather than one per building, and a tile touches only a handful of
+ * cells. Returns [lon0, lat0, lon1, lat1] quads.
+ */
+function buildings_in(SQLite3 $db, float $w, float $s, float $e, float $n): array {
+    $cx0 = (int) floor($w / CELL_DEG); $cx1 = (int) floor($e / CELL_DEG);
+    $cy0 = (int) floor($s / CELL_DEG); $cy1 = (int) floor($n / CELL_DEG);
+
+    $out = [];
+    for ($cx = $cx0; $cx <= $cx1; $cx++) {
+        for ($cy = $cy0; $cy <= $cy1; $cy++) {
+            foreach (bldg_cell($db, $cx, $cy) as $b) {
+                if ($b[2] < $w || $b[0] > $e || $b[3] < $s || $b[1] > $n) { continue; }
+                $out[] = $b;
+            }
+        }
+    }
+    return $out;
+}
+
+/**
+ * One cell's buildings, decoded once and kept.
+ *
+ * pack.php renders 256 tiles in a request and a cell is about the size of a
+ * tile, so without this every cell is decoded a dozen times over. Decoding
+ * is also done in one unpack of the whole blob rather than one per building:
+ * a dense city cell holds thousands, and PHP function call overhead was most
+ * of the cost of drawing a tile.
+ */
+function bldg_cell(SQLite3 $db, int $cx, int $cy): array {
+    static $cache = [];
+    static $order = [];
+
+    $key = "$cx,$cy";
+    if (isset($cache[$key])) { return $cache[$key]; }
+
+    $st = $db->prepare('SELECT boxes FROM bldg WHERE cx = ? AND cy = ?');
+    $st->bindValue(1, $cx, SQLITE3_INTEGER);
+    $st->bindValue(2, $cy, SQLITE3_INTEGER);
+    $row = $st->execute()->fetchArray(SQLITE3_ASSOC);
+
+    $list = [];
+    if ($row !== false && $row['boxes'] !== null) {
+        $blob = $row['boxes'];
+        $vals = unpack('v*', $blob);            // one call for the whole cell
+        $ox = $cx * CELL_DEG;
+        $oy = $cy * CELL_DEG;
+        $scale = CELL_DEG / 65536;
+        $count = count($vals) >> 2;
+        for ($i = 0, $k = 1; $i < $count; $i++, $k += 4) {
+            $list[] = [
+                $ox + $vals[$k] * $scale,
+                $oy + $vals[$k + 1] * $scale,
+                $ox + $vals[$k + 2] * $scale,
+                $oy + $vals[$k + 3] * $scale,
+            ];
+        }
+    }
+
+    // Bounded, so a country-wide render does not accumulate every cell.
+    $cache[$key] = $list;
+    $order[] = $key;
+    if (count($order) > 64) {
+        unset($cache[array_shift($order)]);
+    }
+    return $list;
+}
+
+/** Does this store have building footprints? Older ones do not. */
+function has_buildings(SQLite3 $db): bool {
+    static $seen = [];
+    $key = spl_object_hash($db);
+    if (!isset($seen[$key])) {
+        $r = @$db->querySingle("SELECT name FROM sqlite_master
+                                WHERE type='table' AND name='bldg'");
+        $seen[$key] = ($r !== null && $r !== false);
+    }
+    return $seen[$key];
+}
+
 function render_tile(string $country, int $z, int $x, int $y): string {
     // A palette image, not truecolour: GD writes a palette PNG at the smallest
     // bit depth that fits, so sixteen colours becomes a 4-bit file.
@@ -268,6 +351,29 @@ function render_tile(string $country, int $z, int $x, int $y): string {
 
     $classes = [];
     foreach (road_classes() as $spec) { $classes[$spec[0]] = $spec; }
+
+    // Buildings first, under everything. They are context, not detail: at
+    // z15 a house is two or three pixels, so what they give is the texture of
+    // a built-up area against open ground - which is most of what tells you
+    // where you are on a screen this size. Only from z14 up, below which they
+    // would be a smear.
+    if ($z >= 14 && has_buildings($db)) {
+        $fill = $grey[3];
+        foreach (buildings_in($db, $w, $s, $e, $n) as $b) {
+            $px0 = (int) ((lon_to_tile($b[0], $z) - $x) * TILE_PX);
+            $py0 = (int) ((lat_to_tile($b[3], $z) - $y) * TILE_PX);   // north
+            $px1 = (int) ((lon_to_tile($b[2], $z) - $x) * TILE_PX);
+            $py1 = (int) ((lat_to_tile($b[1], $z) - $y) * TILE_PX);
+            // imagefilledrectangle covers both endpoints, so a box drawn
+            // from px0 to px1 is one pixel wider than it is. Left uncorrected
+            // that inflates every building by a pixel in each direction,
+            // which at three pixels across is a third again - and a city tile
+            // came out as one solid block of fill.
+            if ($px1 > $px0) { $px1--; }
+            if ($py1 > $py0) { $py1--; }
+            imagefilledrectangle($im, $px0, $py0, $px1, $py1, $fill);
+        }
+    }
 
     $segs = segments_in($db, $w - $mw, $s - $mh, $e + $mw, $n + $mh, $z);
 
