@@ -14,3 +14,6 @@ apps/*/keylayout/** -text
 # Shell scripts must stay LF. With core.autocrlf=true a Windows clone would
 # otherwise get CRLF and bash fails on the shebang with $'\r': command not found.
 *.sh text eol=lf
+
+# Product shots and diagrams: never touch these.
+*.png binary
