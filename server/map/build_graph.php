@@ -42,16 +42,45 @@ if (!is_file("$src.shp")) { fwrite(STDERR, "no roads shapefile for $country\n");
 /** Assumed speeds where the data does not say, km/h. Anything absent from
  *  this table is not drivable and is left out of the graph entirely. */
 function drive_speeds(): array {
+    /*
+     * What a car actually averages on each kind of road, not what the sign
+     * says.
+     *
+     * The first version used the speed limit, and the routes came out 25 to
+     * 30 per cent quicker than the reference router - Amsterdam to Utrecht in
+     * 31 minutes against 43. That is not only a wrong arrival time. Cost
+     * decides the route, and overrating town roads against motorways makes
+     * the search prefer the direct way through everywhere rather than the
+     * long way round on a road built for it, which is why our distances came
+     * out shorter than they should have been.
+     *
+     * These are roughly what OSRM's car profile uses, which is derived from
+     * measurement rather than from signage.
+     */
     return [
-        'motorway' => 100, 'motorway_link' => 60,
+        'motorway' => 95, 'motorway_link' => 60,
         'trunk' => 80, 'trunk_link' => 50,
-        'primary' => 70, 'primary_link' => 45,
-        'secondary' => 60, 'secondary_link' => 40,
-        'tertiary' => 50, 'tertiary_link' => 35,
-        'unclassified' => 40, 'residential' => 30, 'living_street' => 15,
-        'service' => 15, 'track' => 15, 'unknown' => 30,
+        'primary' => 60, 'primary_link' => 40,
+        'secondary' => 50, 'secondary_link' => 35,
+        'tertiary' => 40, 'tertiary_link' => 30,
+        'unclassified' => 30, 'residential' => 22, 'living_street' => 8,
+        'service' => 12, 'track' => 10, 'unknown' => 25,
     ];
 }
+
+/*
+ * What a real junction costs, in seconds.
+ *
+ * Charged only where three or more ways meet. Most nodes in this graph are
+ * not junctions at all - they are a way split because an attribute changed,
+ * or because another way ends there - and charging at every one made a
+ * journey through a town cost far more than it does, which pushed routes onto
+ * long ways round: Vlissingen to Rotterdam went 16 per cent further than the
+ * reference router rather than 3.
+ *
+ * Four seconds is the give-way, the lights and the turn, averaged.
+ */
+const JUNCTION_SEC = 4.0;
 
 /** Quantised to about a centimetre; shapefile coordinates of the same OSM
  *  node are bit-identical, but rounding guards against a rebuilt extract. */
@@ -141,6 +170,9 @@ fwrite(STDERR, sprintf("nodes: %d (%.0fs)\n", $next, microtime(true) - $t0));
 $lat = array_fill(0, $next, 0);
 $lon = array_fill(0, $next, 0);
 $arcsFrom = [];      // node => list of [target, cost]
+// The same links the other way round, used once to work out which pieces of
+// the network touch. A one-way street still joins what it connects.
+$backFrom = [];
 $arcCount = 0;
 
 fseek($shp, 100);
@@ -196,10 +228,20 @@ while (ftell($shp) < $fileLen) {
         $lon[$id] = (int) round($x * 1e7);
 
         if ($prevNode !== null && $prevNode !== $id && $runM > 0) {
+            // The junction charge is added in a later pass, once every node's
+            // degree is known - a node is only a junction if things meet there.
             $cost = (int) round(($runM / $mps) * 10);      // deciseconds
             if ($cost < 1) { $cost = 1; }
-            if ($fwd) { $arcsFrom[$prevNode][] = [$id, $cost]; $arcCount++; }
-            if ($bwd) { $arcsFrom[$id][] = [$prevNode, $cost]; $arcCount++; }
+            if ($fwd) {
+                $arcsFrom[$prevNode][] = [$id, $cost];
+                $backFrom[$id][] = $prevNode;
+                $arcCount++;
+            }
+            if ($bwd) {
+                $arcsFrom[$id][] = [$prevNode, $cost];
+                $backFrom[$prevNode][] = $id;
+                $arcCount++;
+            }
             $edges++;
         }
         $prevNode = $id;
@@ -214,6 +256,112 @@ while (ftell($shp) < $fileLen) {
 fclose($shp); fclose($dbf);
 fwrite(STDERR, sprintf("\npass 2: %d edges, %d arcs, %.0fs\n",
     $edges, $arcCount, microtime(true) - $t0));
+
+// ------------------------------------------------ charge for real junctions
+
+/*
+ * Now that every arc exists, the degree of each node is known, and an arc
+ * that ends where three or more ways meet is charged for the junction.
+ */
+$degree = array_fill(0, $next, 0);
+foreach ($arcsFrom as $u => $list) {
+    foreach ($list as [$v, $c]) { $degree[$v]++; $degree[$u]++; }
+}
+$charged = 0;
+$penalty = (int) round(JUNCTION_SEC * 10);
+foreach ($arcsFrom as $u => $list) {
+    foreach ($list as $i => [$v, $c]) {
+        if ($degree[$v] >= 3) {
+            $nc = $c + $penalty;
+            $arcsFrom[$u][$i] = [$v, $nc > 65535 ? 65535 : $nc];
+            $charged++;
+        }
+    }
+}
+fwrite(STDERR, sprintf("junction charge applied to %d of %d arcs\n", $charged, $arcCount));
+unset($degree);
+
+// -------------------------------------------------- keep what can be reached
+
+/*
+ * Everything not connected to the main road network is dropped.
+ *
+ * The network is not one piece. Built from the Netherlands, it comes out as
+ * 8,506 separate components: one of 1.42 million nodes that is the road
+ * network, and 8,505 fragments - driveways, car parks, service loops, stubs
+ * whose connecting way was not drivable and so was never imported.
+ *
+ * That matters because snapping picks the nearest node. Asked to route to
+ * Enschede, it landed on a seven-node island with one arc out and the search
+ * then explored all 1.42 million nodes of the real network before reporting
+ * no route - which is exactly what it should say about that node, and exactly
+ * the wrong answer for the request. Which destinations fail is decided by
+ * whatever fragment happens to be nearest, so it looks random.
+ *
+ * The fragments cannot be routed to or from, so they are not worth carrying.
+ * Dropping them means every node in the file is reachable from every other,
+ * and snapping cannot pick somewhere useless.
+ */
+fwrite(STDERR, "finding the connected network...\n");
+
+$comp = array_fill(0, $next, -1);
+$bestComp = -1; $bestSize = 0; $components = 0;
+
+for ($seed = 0; $seed < $next; $seed++) {
+    if ($comp[$seed] >= 0) { continue; }
+    $stack = [$seed];
+    $comp[$seed] = $components;
+    $size = 0;
+    while ($stack) {
+        $u = array_pop($stack);
+        $size++;
+        if (isset($arcsFrom[$u])) {
+            foreach ($arcsFrom[$u] as [$v, $c]) {
+                if ($comp[$v] < 0) { $comp[$v] = $components; $stack[] = $v; }
+            }
+        }
+        // Arcs are directed; connectivity here is about whether the pieces
+        // touch at all, so the reverse direction counts too.
+        if (isset($backFrom[$u])) {
+            foreach ($backFrom[$u] as $v) {
+                if ($comp[$v] < 0) { $comp[$v] = $components; $stack[] = $v; }
+            }
+        }
+    }
+    if ($size > $bestSize) { $bestSize = $size; $bestComp = $components; }
+    $components++;
+}
+
+fwrite(STDERR, sprintf("%d components; keeping the largest, %d of %d nodes (%.1f%%)\n",
+    $components, $bestSize, $next, 100.0 * $bestSize / $next));
+
+$keep = [];
+$renum = array_fill(0, $next, -1);
+$kept = 0;
+for ($i = 0; $i < $next; $i++) {
+    if ($comp[$i] === $bestComp) { $renum[$i] = $kept++; $keep[] = $i; }
+}
+
+$newArcs = [];
+$dropped = 0;
+foreach ($arcsFrom as $u => $list) {
+    if ($renum[$u] < 0) { $dropped += count($list); continue; }
+    foreach ($list as [$v, $c]) {
+        if ($renum[$v] < 0) { $dropped++; continue; }
+        $newArcs[$renum[$u]][] = [$renum[$v], $c];
+    }
+}
+$newLat = []; $newLon = [];
+foreach ($keep as $pos => $old) { $newLat[$pos] = $lat[$old]; $newLon[$pos] = $lon[$old]; }
+
+$arcsFrom = $newArcs;
+$lat = $newLat;
+$lon = $newLon;
+$next = $kept;
+$arcCount -= $dropped;
+unset($comp, $renum, $keep, $newArcs, $newLat, $newLon, $backFrom);
+fwrite(STDERR, sprintf("dropped %d arcs into fragments; %d nodes, %d arcs remain\n",
+    $dropped, $next, $arcCount));
 
 // ---------------------------------------------------------------- write out
 

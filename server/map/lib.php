@@ -625,8 +625,17 @@ function render_tile(string $country, int $z, int $x, int $y): string {
     $mw = ($e - $w) * 0.15;
     $mh = ($n - $s) * 0.15;
 
+    // First occurrence wins, not last.
+    //
+    // road_classes() lists a road and then its slip road under the same class
+    // code - motorway then motorway_link - so assigning blindly left every
+    // motorway drawn with the slip road's width and colour, and palette
+    // entries 26 and 27, the two brightest, were never used at all. The
+    // hierarchy the palette was built around simply did not reach the screen.
     $classes = [];
-    foreach (road_classes() as $spec) { $classes[$spec[0]] = $spec; }
+    foreach (road_classes() as $spec) {
+        if (!isset($classes[$spec[0]])) { $classes[$spec[0]] = $spec; }
+    }
 
     // Ground cover under everything else, from z12 up. Below that a wood is
     // a smudge and the shape of the coast is all that reads.
