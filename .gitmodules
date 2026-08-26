@@ -1,0 +1,3 @@
+[submodule "apps/watchlauncher"]
+	path = apps/watchlauncher
+	url = https://github.com/no-body-in-particular/pt880-launcher.git

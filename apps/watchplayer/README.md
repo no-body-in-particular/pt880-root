@@ -84,12 +84,18 @@ AVRCP, plus volume (see below).
 ## Adding music
 
 ```bash
-adb push "yourfile.mp3" /sdcard/Music/
+adb push "yourfile.m4a" /sdcard/Music/
 ```
 
 Then **Menu → Rescan music**. The app walks the filesystem directly rather than
 using `MediaStore`, so files show up immediately without waiting for the media
 scanner. It picks up mp3, m4a, aac, wav, ogg, flac and a few others.
+
+The library these come from is AAC in `.m4a`, kept as YouTube serves it rather
+than re-encoded to MP3 — smaller and closer to the source, and `MediaPlayer`
+decodes AAC-LC natively on API 19. **Opus is the one thing to avoid**: it is the
+better codec, but Android only learned to decode it in API 21, so an `.opus`
+file scans in and then fails to play.
 
 ## Bluetooth
 

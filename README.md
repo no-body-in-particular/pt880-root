@@ -17,6 +17,25 @@ working touchscreen. That shapes everything in
 Read [NOTES.md](NOTES.md) first — it documents the verification chain, every
 patch offset, and the dead ends worth not repeating.
 
+## The launcher
+
+The watch's own software - map and offline navigation, music, camera, calls,
+bluetooth pairing and a root shell, in one application - now lives in its own
+repository:
+
+**https://github.com/no-body-in-particular/pt880-launcher**
+
+It is attached here as a submodule at `apps/watchlauncher`, so:
+
+    git clone --recursive https://github.com/no-body-in-particular/pt880-root.git
+
+or, in a clone that already exists:
+
+    git submodule update --init
+
+It was split out with its history intact rather than copied, so `git log` in
+that repository goes back to the first version of the launcher.
+
 ## Status
 
 | Goal | State |
