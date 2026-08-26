@@ -31,7 +31,17 @@ pub struct App {
     pub stores: store::Stores,
     pub tiles: PathBuf,
     pub data: PathBuf,
+    /// Whether assembled blocks are written to disk. Off by default - see
+    /// block_bytes.
+    pub disk_cache: bool,
+    /// A few recent blocks, for the watch retrying one it failed to read.
+    pub recent: std::sync::Mutex<Vec<(String, Vec<u8>)>>,
 }
+
+/// How many assembled blocks to keep in memory. Twenty of them is a few
+/// megabytes and covers a retry, which is the only repeat that actually
+/// happens: the watch stores what it downloads, so it does not ask twice.
+const RECENT_BLOCKS: usize = 20;
 
 fn query(url: &str) -> HashMap<String, String> {
     let mut out = HashMap::new();
@@ -173,11 +183,34 @@ fn block_path(app: &App, country: &str, z: u8, bx: i32, by: i32) -> PathBuf {
 /// One 16x16 block, assembled and cached. The tiles are rendered in parallel:
 /// they are independent, there are 256 of them, and the machine has cores
 /// that were sitting idle while php-cgi worked through them one at a time.
+/// One 16x16 block, assembled.
+///
+/// The tiles are rendered in parallel: they are independent, there are 256 of
+/// them, and the machine has cores that sat idle while php-cgi worked through
+/// them one at a time.
+///
+/// Not written to disk by default. Measured on this data, an average block
+/// renders in 120ms and reads back from disk in 40ms, while transferring it to
+/// the watch over wifi takes 2.2 seconds - so the cache saved four per cent of
+/// a download and cost 215MB per country, which for Europe and America would
+/// be tens of gigabytes. It also had to be wiped by hand every time the
+/// rendering changed, and twice this week that was noticed only after the
+/// watch had downloaded the stale version. Rendering afresh is always correct
+/// and nearly always fast enough. Set MAP_DISK_CACHE=1 to put it back.
 fn block_bytes(app: &App, c: &'static store::Country, z: u8, bx: i32, by: i32) -> Vec<u8> {
-    let path = block_path(app, &c.name, z, bx, by);
-    if let Ok(b) = std::fs::read(&path) {
-        if b.len() > 9 {
-            return b;
+    let key = format!("{}/{}/{}_{}", c.name, z, bx, by);
+
+    if app.disk_cache {
+        if let Ok(b) = std::fs::read(block_path(app, &c.name, z, bx, by)) {
+            if b.len() > 9 {
+                return b;
+            }
+        }
+    }
+    {
+        let recent = app.recent.lock().unwrap();
+        if let Some((_, b)) = recent.iter().find(|(k, _)| *k == key) {
+            return b.clone();
         }
     }
 
@@ -210,17 +243,26 @@ fn block_bytes(app: &App, c: &'static store::Country, z: u8, bx: i32, by: i32) -
         body.extend_from_slice(png);
     }
 
-    if let Some(dir) = path.parent() {
-        let _ = std::fs::create_dir_all(dir);
+    if app.disk_cache {
+        let path = block_path(app, &c.name, z, bx, by);
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        // Written under a temporary name and moved, so a request arriving
+        // while this one is still writing cannot read a half block.
+        let tmp = path.with_extension(format!("wpk.{}", std::process::id()));
+        if std::fs::write(&tmp, &body).is_ok() {
+            let _ = std::fs::rename(&tmp, &path);
+        } else {
+            let _ = std::fs::remove_file(&tmp);
+        }
     }
-    // Written under a temporary name and moved, so a request arriving while
-    // this one is still writing cannot read a half block.
-    let tmp = path.with_extension(format!("wpk.{}", std::process::id()));
-    if std::fs::write(&tmp, &body).is_ok() {
-        let _ = std::fs::rename(&tmp, &path);
-    } else {
-        let _ = std::fs::remove_file(&tmp);
+
+    let mut recent = app.recent.lock().unwrap();
+    if recent.len() >= RECENT_BLOCKS {
+        recent.remove(0);
     }
+    recent.push((key, body.clone()));
     body
 }
 
@@ -337,17 +379,21 @@ fn main() {
     let addr = std::env::var("MAP_ADDR").unwrap_or_else(|_| "127.0.0.1:8088".into());
     let root = PathBuf::from(root);
 
+    let disk_cache = std::env::var("MAP_DISK_CACHE").map(|v| v == "1").unwrap_or(false);
     let app = Arc::new(App {
         stores: store::Stores::new(root.join("data")),
         tiles: root.join("tiles"),
         data: root.join("data"),
+        disk_cache,
+        recent: std::sync::Mutex::new(Vec::new()),
     });
 
     let server = Server::http(&addr).expect("bind");
     let countries = app.stores.names();
     eprintln!(
-        "mapd listening on {}, {} countries: {}",
+        "mapd listening on {}, tile disk cache {}, {} countries: {}",
         addr,
+        if disk_cache { "on" } else { "off" },
         countries.len(),
         countries.join(", ")
     );

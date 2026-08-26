@@ -34,6 +34,25 @@ a photograph, where neighbouring bytes are nearly equal, and hurts a palette
 image, where they are unrelated indices - left on the encoder's default,
 tiles came out nearly twice the size GD manages.
 
+## Tiles are not cached to disk
+
+Measured on this data: an average block renders in 120ms and reads back from
+disk in 40ms, while transferring it to the watch over wifi takes 2.2 seconds.
+So the cache saved four per cent of a download and cost 215MB per country -
+which for Europe and America would have been tens of gigabytes.
+
+It also had to be wiped by hand every time the rendering changed, and twice
+in one week that was noticed only after the watch had already downloaded the
+stale version. Rendering afresh is always correct and nearly always faster
+than the network it feeds. A dense city block takes 110ms with the cell
+caches warm, which they stay, because this is a service rather than a script.
+
+Twenty recent blocks are kept in memory, which covers the watch retrying one
+it failed to read - the only repeat that actually happens, since the watch
+stores what it downloads.
+
+Set `MAP_DISK_CACHE=1` to put the disk cache back.
+
 ## Running
 
     rc-service mapd start
