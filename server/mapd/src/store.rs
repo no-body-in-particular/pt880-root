@@ -18,6 +18,12 @@ pub type Pt = (f64, f64);
 
 pub struct Segment {
     pub cls: i32,
+    /// The zoom at which this way starts being worth drawing. Kept rather
+    /// than folded into the class: a cell is cached once and served at any
+    /// zoom, so the filter has to happen when the tile is drawn. Folding it
+    /// at a fixed 15 meant a zoomed-out tile was drawn with every footpath
+    /// and service road in it.
+    pub minzoom: i32,
     pub pts: Vec<Pt>,
 }
 
@@ -175,12 +181,7 @@ impl Country {
                 for (cls, minzoom, geom) in rows.flatten() {
                     let pts = unpack_geom(&geom);
                     if pts.len() >= 2 {
-                        // minzoom is folded into the class so a single cached
-                        // cell serves every zoom: negative means "not yet".
-                        out.push(Segment {
-                            cls: if minzoom <= 15 { cls } else { -cls },
-                            pts,
-                        });
+                        out.push(Segment { cls, minzoom, pts });
                     }
                 }
             }
