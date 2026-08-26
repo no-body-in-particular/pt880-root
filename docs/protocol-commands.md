@@ -26,27 +26,30 @@ Each handler in `protocol_beehome` checks the number of comma separated fields
 before doing anything, so that count *is* the format. Three fields means imei and
 serial number, four adds one value, five adds two.
 
-| Server command | Wire form | Fields | What the watch does |
-|---|---|---|---|
-| `SYNCTIME#` | `IWBP00,<time>,<tz>#` | - | set the clock |
-| `LOCATE#` | `IWBP16,<imei>,<serial>#` | 3 | fix now |
-| `RESTART#` | `IWBP18,<imei>,<serial>#` | 3 | reboot |
-| `SHUTDOWN#` | `IWBP31,<imei>,<serial>#` | 3 | power off |
-| `FACTORYALL#` | `IWBP17,<imei>,<serial>#` | 3 | factory reset |
-| `HEARTRATE#` | `IWBPXL,<imei>,<serial>#` | 3 | take a heart rate reading |
-| `UPDATE=<s>#` | `IWBP15,<imei>,<serial>,<s>#` | 4 | location interval, seconds |
-| `MODE=<n>#` | `IWBP33,<imei>,<serial>,<n>#` | 4 | working mode |
-| `TIMES=<hhmm@hhmm>#` | `IWBP34,<imei>,<serial>,1,<v>#` | 5 | working hours |
-| `MSG=<text>#` | `IWBP40,<imei>,<serial>,<hex>#` | 4 | text message, hex encoded |
-| `PHOTO#` | `IWBP46,<imei>,<serial>,1#` | 4 | take a picture |
-| `SPO2#` | `IWBPOX,<imei>,<serial>,1#` | 4 | blood oxygen reading |
-| `TEMP#` | `IWBPTE,<imei>,<serial>,1#` | 4 | temperature reading |
-| `HOURS=12\|24` | `IWBPTF,<imei>,<0\|1>#` | 3 | clock format, 1 is 24 hour |
-| `PHONE=0\|1` | `IWBPPH,<imei>,<serial>,<v>#` | 4 | call switch, sets `persist.sys.phone.enable` |
-| `MOTION=0\|1` | `IWBPMC,<imei>,<serial>,<v>#` | 4 | motion detection |
-| `HEALTHINT=<hr>,<bp>` | `IWBP86,<imei>,<serial>,<hr>,<bp>#` | 5 | heart rate and blood pressure periods, minutes |
-| `RECORD#` | see *Recording* below | - | record ten seconds and upload it |
-| `SMS=<cmd>` | see *The SMS tunnel* below | 4 | run one of the `#...#` commands |
+| Server command | Wire form | Fields | What the watch does | Confirmed |
+|---|---|---|---|---|
+| `SYNCTIME#` | `IWBP00,<time>,<tz>#` | - | set the clock | in use |
+| `LOCATE#` | `IWBP16,<imei>,<serial>#` | 3 | fix now | in use |
+| `RESTART#` | `IWBP18,<imei>,<serial>#` | 3 | reboot | in use |
+| `SHUTDOWN#` | `IWBP31,<imei>,<serial>#` | 3 | power off | in use |
+| `FACTORYALL#` | `IWBP17,<imei>,<serial>#` | 3 | factory reset | in use |
+| `HEARTRATE#` | `IWBPXL,<imei>,<serial>#` | 3 | heart rate reading | in use |
+| `UPDATE=<s>#` | `IWBP15,<imei>,<serial>,<s>#` | 4 | location interval, seconds | in use |
+| `MODE=<n>#` | `IWBP33,<imei>,<serial>,<n>#` | 4 | working mode | in use |
+| `TIMES=<hhmm@hhmm>#` | `IWBP34,<imei>,<serial>,1,<v>#` | 5 | working hours | in use |
+| `MSG=<text>#` | `IWBP40,<imei>,<serial>,<hex>#` | 4 | text message, hex encoded | in use |
+| `PHOTO#` | `IWBP46,<imei>,<serial>,1#` | 4 | take a picture | **yes** — answers `IWAP46`, picture follows |
+| `RECORD#` | `IWBPSM,<imei>,<serial>,@monitor@#` | 4 | record ten seconds and upload | **yes** — 15334 byte AMR, 9.889 s |
+| `SPO2#` | `IWBPOX,<imei>,<serial>,1#` | 4 | blood oxygen reading | **yes** — answers `IWAPOX` |
+| `TEMP#` | `IWBPTE,<imei>,<serial>,1#` | 4 | temperature reading | **yes** — answers `IWAPTE` |
+| `MOTION=0\|1` | `IWBPMC,<imei>,<serial>,<v>#` | 4 | motion detection | **yes** — answers `IWAPMC` |
+| `PHONE=0\|1` | `IWBPPH,<imei>,<serial>,<v>#` | 4 | call switch, sets `persist.sys.phone.enable` | **yes** — answers `IWAPPH` |
+| `HOURS=12\|24` | `IWBPTF,<imei>,<0\|1>#` | 3 | clock format, 1 is 24 hour | **yes** — answers `IWAPTF` |
+| `HEALTHINT=<hr>,<bp>` | `IWBP86,<imei>,<serial>,<hr>,<bp>#` | 5 | heart rate and blood pressure periods, minutes | **yes** — answers `IWAP86` |
+| `SMS=<cmd>` | `IWBPSM,<imei>,<serial>,<escaped>#` | 4 | run one of the `#...#` commands | **yes** — via `RECORD#` |
+
+`HOURS=` is the odd one: three fields and no serial number, which is what `handleBPTF`
+checks for and what the watch answers to.
 
 **Every packet must end in `#`.** The older commands take that character from
 whatever the caller typed, so `UPDATE=600#` works and `UPDATE=600` goes out
@@ -83,6 +86,24 @@ Two more things the document does not mention:
   Accept both.
 * **The payload is hex.** A 1024 byte chunk arrives as 2048 characters of
   `ffd8ffe0...`, and the length field counts characters, not bytes.
+
+## Health readings: telling the watch, rather than asking it
+
+The watch will report heart rate, blood pressure, temperature and blood oxygen on a schedule
+of its own once `BP86` has set the period, and does not need to be asked for each reading.
+Twenty polls an hour becomes one command every few hours, and its radio can stay down in
+between.
+
+    HEALTHINT=<heart rate>,<blood pressure>     both in minutes
+
+Readings then arrive unprompted as `IWAPJK` - type 1 is heart rate and blood pressure as
+`<hr>|<bp>`, 2 is heart rate, 3 is temperature, 4 is blood oxygen.
+
+Two things follow from the watch keeping its own schedule. The period has to be re-sent
+occasionally, because a watch that was reset or never took the command would otherwise stay
+silent forever with nothing to notice. And a gap in readings means less than it used to: no
+poll went unanswered, the watch simply did not speak - so whatever restarts a device that has
+gone quiet should be given a good deal more rope than a poll interval would suggest.
 
 ## Recording
 

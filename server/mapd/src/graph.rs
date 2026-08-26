@@ -9,6 +9,7 @@ use crate::mercator::CELL_DEG;
 use crate::App;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::Ordering;
 use tiny_http::Request;
 
 use crate::{header, num, send_bytes, send_status, send_text};
@@ -244,6 +245,52 @@ pub fn handle(app: &App, r: Request, q: &HashMap<String, String>, gz: bool) {
     }
 }
 
+/// At most this many route requests may be waiting on the upstream router at
+/// once, out of a worker pool the size of the machine's cores.
+const MAX_INFLIGHT_ROUTES: usize = 2;
+
+/// The most cached routes to keep. A route is a few kilobytes and the cache
+/// key is four coordinates to five decimal places, so there is no natural
+/// limit to how many distinct ones can be asked for - without this the
+/// directory grows until the disk is full, which takes a bored script an
+/// afternoon.
+const MAX_CACHED_ROUTES: usize = 4000;
+
+/// Decrement on the way out, whichever way that is - an early return for a
+/// full queue, an upstream error, or success.
+struct Release<'a>(&'a std::sync::atomic::AtomicUsize);
+impl Drop for Release<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Keep the route cache under MAX_CACHED_ROUTES, oldest evicted first.
+///
+/// Only runs when a route is about to be written, which is only on a miss, so
+/// the directory listing costs nothing in the common case. It counts first
+/// and sorts only when over, because sorting four thousand entries to delete
+/// none of them is the sort of thing that looks free until the disk is slow.
+fn trim_routes(dir: &std::path::Path) {
+    let mut files: Vec<_> = match std::fs::read_dir(dir) {
+        Ok(rd) => rd.filter_map(|e| e.ok()).collect(),
+        Err(_) => return,
+    };
+    if files.len() <= MAX_CACHED_ROUTES {
+        return;
+    }
+    files.sort_by_key(|e| {
+        e.metadata()
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+    });
+    // Down to nine tenths, so this does not run again on the very next write.
+    let drop_to = MAX_CACHED_ROUTES * 9 / 10;
+    for e in files.iter().take(files.len().saturating_sub(drop_to)) {
+        let _ = std::fs::remove_file(e.path());
+    }
+}
+
 /// Routing, proxied to an OSRM instance and cached for a day.
 ///
 /// The watch routes on its own graph when it has one, which is nearly always:
@@ -282,12 +329,24 @@ pub fn route(app: &App, r: Request, q: &HashMap<String, String>) {
         }
     }
 
+    // Only so many of these may be in flight at once. Past that, say so
+    // immediately rather than holding a worker: a watch told "busy" asks
+    // again, a watch told nothing for twenty seconds has already given up,
+    // and every other endpoint stays answerable meanwhile.
+    let inflight = app.routing.fetch_add(1, Ordering::SeqCst);
+    let _release = Release(&app.routing);
+    if inflight >= MAX_INFLIGHT_ROUTES {
+        return send_status(r, 503, "routing busy");
+    }
+
     let url = format!(
         "{}/route/v1/driving/{:.6},{:.6};{:.6},{:.6}\
          ?overview=full&geometries=geojson&steps=true",
         app.osrm, flon, flat, tlon, tlat
     );
-    let body = match ureq::get(&url).timeout(std::time::Duration::from_secs(20)).call() {
+    // Well under the watch's own patience. A routing service that has not
+    // answered in eight seconds is not about to.
+    let body = match ureq::get(&url).timeout(std::time::Duration::from_secs(8)).call() {
         Ok(res) => res.into_string().unwrap_or_default(),
         Err(_) => return send_status(r, 502, "no route"),
     };
@@ -296,6 +355,7 @@ pub fn route(app: &App, r: Request, q: &HashMap<String, String>) {
         Some(bin) => {
             if let Some(d) = cached.parent() {
                 let _ = std::fs::create_dir_all(d);
+                trim_routes(d);
             }
             let _ = std::fs::write(&cached, &bin);
             send_bytes(r, bin, "application/octet-stream", false)

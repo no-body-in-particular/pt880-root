@@ -36,6 +36,14 @@ pub struct App {
     pub disk_cache: bool,
     /// Base URL of the OSRM used by /route.php, without a trailing slash.
     pub osrm: String,
+    /// How many route requests are waiting on that OSRM right now.
+    ///
+    /// Every one of them is holding a worker. There are only as many workers
+    /// as cores, so without a cap eight requests to a routing service that
+    /// has gone quiet stop this one answering anything at all - measured at
+    /// 19 seconds for a tile that takes under two. The watch downloading a
+    /// country simply stalls, and nothing in the log says why.
+    pub routing: std::sync::atomic::AtomicUsize,
     /// A few recent blocks, for the watch retrying one it failed to read.
     /// Held behind an Arc so serving one costs a refcount rather than a copy
     /// of up to a megabyte and a half.
@@ -429,6 +437,7 @@ fn main() {
         data: root.join("data"),
         disk_cache,
         osrm,
+        routing: std::sync::atomic::AtomicUsize::new(0),
         recent: std::sync::Mutex::new(Vec::new()),
     });
 
