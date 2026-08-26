@@ -34,6 +34,16 @@ serial number, four adds one value, five adds two.
 | `SHUTDOWN#` | `IWBP31,<imei>,<serial>#` | 3 | power off | in use |
 | `FACTORYALL#` | `IWBP17,<imei>,<serial>#` | 3 | factory reset | in use |
 | `HEARTRATE#` | `IWBPXL,<imei>,<serial>#` | 3 | heart rate reading | in use |
+| `PULSE#` | `IWBP50,<imei>,<serial>#` | 3 | heart rate reading, the other trigger | confirmed |
+| `BLOODPRESSURE#` | `IWBPXY,<imei>,<serial>#` | 3 | blood pressure reading | in use |
+| `OXYGEN#` | `IWBPXZ,<imei>,<serial>#` | 3 | blood oxygen reading | in use |
+| `FIND#` | `IWBP88,<imei>,<serial>#` | 3 | ring the watch | in use |
+| `CALL=<number>` | `IWBP32,<imei>,<serial>,<number>#` | 3 | dial a number | in use |
+| `SOS=<n1>,<n2>,<n3>` | `IWBP12,<imei>,<serial>,<n1>,<n2>,<n3>#` | 3 | the SOS numbers | in use |
+| `LANG=<lang>,<tz>` | `IWBP20,<imei>,<serial>,<lang>,<tz>#` | 3 | language and time zone | in use |
+| `CONTACT=<name>,<num>` | `IWBP51,<imei>,<serial>,<hex name>,<num>#` | 3 | phone book entry | in use |
+| `DELCONTACT=<num>` | `IWBP52,<imei>,<serial>,<num>#` | 3 | remove a phone book entry | in use |
+| `WHITELIST=<0\|1>` | `IWBP84,<imei>,<serial>,<flag>#` | 3 | whitelist on or off | in use |
 | `UPDATE=<s>#` | `IWBP15,<imei>,<serial>,<s>#` | 4 | location interval, seconds | in use |
 | `MODE=<n>#` | `IWBP33,<imei>,<serial>,<n>#` | 4 | working mode | in use |
 | `LOCMODE=<mode>,<sec>[,<gps>]` | `IWBP34,<imei>,<serial>,<mode>,<sec>,<gps>#` | 5 | location mode, interval, GPS switch | in use |
@@ -190,3 +200,15 @@ Recovery is different - `init.rc` starts
     service adbd /sbin/adbd --root_seclabel=u:r:su:s0 --device_banner=recovery
 
 so adb in recovery runs as root, but still over USB.
+
+
+## PULSE# against the hardware
+
+`IWBP50` was sent to the watch and answered twenty two seconds later with
+`IWAPJK,...,2,61` - a pulse of 61. It does trigger a measurement.
+
+What it does not send is the `IWAP50,<serial>,1#` acknowledgement the protocol document
+describes. This firmware answers with the reading instead, which is worth knowing before
+somebody waits for an ack that is never coming and concludes the command failed. `IWBPXL`
+behaves the other way round: it acknowledges with `IWAPXL` and then may or may not measure,
+which is what made a second trigger worth having.
