@@ -36,7 +36,7 @@ serial number, four adds one value, five adds two.
 | `HEARTRATE#` | `IWBPXL,<imei>,<serial>#` | 3 | heart rate reading | in use |
 | `UPDATE=<s>#` | `IWBP15,<imei>,<serial>,<s>#` | 4 | location interval, seconds | in use |
 | `MODE=<n>#` | `IWBP33,<imei>,<serial>,<n>#` | 4 | working mode | in use |
-| `TIMES=<hhmm@hhmm>#` | `IWBP34,<imei>,<serial>,1,<v>#` | 5 | working hours | in use |
+| `LOCMODE=<mode>,<sec>[,<gps>]` | `IWBP34,<imei>,<serial>,<mode>,<sec>,<gps>#` | 5 | location mode, interval, GPS switch | in use |
 | `MSG=<text>#` | `IWBP40,<imei>,<serial>,<hex>#` | 4 | text message, hex encoded | in use |
 | `PHOTO#` | `IWBP46,<imei>,<serial>,1#` | 4 | take a picture | **yes** — answers `IWAP46`, picture follows |
 | `RECORD#` | `IWBPSM,<imei>,<serial>,@monitor@#` | 4 | record ten seconds and upload | **yes** — 15334 byte AMR, 9.889 s |
