@@ -245,6 +245,27 @@ pub fn handle(app: &App, r: Request, q: &HashMap<String, String>, gz: bool) {
     }
 }
 
+/// The speed cameras, motorway exits and filling stations for a country.
+///
+/// A plain file, served like the graph and validated the same way: the name
+/// comes from a query string, so it is checked against a character set rather
+/// than trusted to be a filename. A country without one is a 404 and the
+/// watch does without.
+pub fn alerts(app: &App, r: Request, q: &HashMap<String, String>) {
+    let name = match q.get("c") {
+        Some(n) if !n.is_empty() => n.clone(),
+        _ => return send_status(r, 400, "no country"),
+    };
+    if !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
+        return send_status(r, 400, "bad country");
+    }
+    let p = app.data.join(format!("{}.alerts", name));
+    match std::fs::read(&p) {
+        Ok(b) => send_bytes(r, b, "application/octet-stream", false),
+        Err(_) => send_status(r, 404, "no alerts"),
+    }
+}
+
 /// At most this many route requests may be waiting on the upstream router at
 /// once, out of a worker pool the size of the machine's cores.
 const MAX_INFLIGHT_ROUTES: usize = 2;

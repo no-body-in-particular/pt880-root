@@ -413,6 +413,8 @@ fn handle(app: &App, r: Request) {
 
         "route.php" => graph::route(app, r, &q),
 
+        "alerts.php" => graph::alerts(app, r, &q),
+
         "health" => send_text(r, "ok\n"),
 
         _ => send_status(r, 404, "no such endpoint"),

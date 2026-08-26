@@ -49,8 +49,13 @@ fi
 # has to be read: buildings are drawn whatever they are, so their 1.7GB of
 # attributes are left in the archive.
 echo "== extracting"
+# transport carries ferry terminals, which build_graph turns into crossings so
+# islands are reachable; traffic carries speed cameras and motorway junctions,
+# which build_alerts packs for the watch to announce. Two layers, two jobs.
 unzip -o -q "$ZIP" -d "$SRC" \
     "gis_osm_roads_free_1.*" \
+    "gis_osm_transport_free_1.*" \
+    "gis_osm_traffic_free_1.*" \
     "gis_osm_landuse_a_free_1.shp" "gis_osm_landuse_a_free_1.shx" "gis_osm_landuse_a_free_1.dbf" \
     "gis_osm_water_a_free_1.shp"   "gis_osm_water_a_free_1.shx" \
     "gis_osm_natural_a_free_1.shp" "gis_osm_natural_a_free_1.shx" "gis_osm_natural_a_free_1.dbf" \
@@ -68,6 +73,11 @@ echo "== railways and waterways"
 php import_lines.php "$NAME"
 echo "== routing graph"
 php build_graph.php "$NAME"
+
+# The things beside the road: speed cameras to warn about, motorway junctions
+# to name, filling stations to find. None of them affect routing, so a country
+# without a traffic layer just does not get one and the watch says nothing.
+php build_alerts.php "$NAME" || echo "  (no alert layer for $NAME)"
 
 # The web server has to be able to write the tile cache for this country.
 if id hiawatha >/dev/null 2>&1; then

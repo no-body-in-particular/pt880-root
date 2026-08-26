@@ -57,6 +57,34 @@ if (!is_file("$src.shp")) { fwrite(STDERR, "no roads shapefile for $country\n");
  */
 const JUNCTION_SEC = 4.0;
 
+/*
+ * Why there is no extra charge for a signalised junction.
+ *
+ * It looks like the obvious next move, and it was tried twice. Our routes cut
+ * through city centres where the reference routers go round, so first the
+ * junction charge was scaled by how many junctions were nearby - density as a
+ * proxy for "town" - and then, when that failed, by whether the junction
+ * actually has traffic lights on it. The data is there: 33,977 signals in
+ * this extract, 4,012 of them on junctions the graph knows about.
+ *
+ * Both made things worse, and for the same reason. At twenty seconds a signal
+ * - the average wait on an eighty second cycle - Haarlem to Noordwijk
+ * improved by ten per cent and Nijmegen to Enschede got eleven kilometres
+ * longer, taking a motorway detour to avoid towns it should have driven
+ * through. Charging only junctions and not crossings made no difference to
+ * that.
+ *
+ * The reason is above, in drive_speeds(): those are what a car averages on
+ * each kind of road, measured, not what the sign says. A primary road is
+ * 60 km/h in that table because 60 is what you average on one - including the
+ * time spent at its lights. Adding a signal charge on top counts the same
+ * delay twice, and the search responds by avoiding exactly the roads the
+ * numbers were measured on.
+ *
+ * The remaining disagreement with the references is real and is not this.
+ */
+
+
 /** The fewest nodes a piece of the network can have and still be somewhere
  *  rather than an artifact. See the pruning pass for where this comes from. */
 const MIN_COMPONENT = 200;
@@ -66,6 +94,9 @@ const MIN_COMPONENT = 200;
 function key_of(float $lon, float $lat): int {
     return ((int) round($lon * 1e7)) * 4000000000 + ((int) round($lat * 1e7));
 }
+
+
+require_once __DIR__ . '/layers.php';
 
 $speeds = drive_speeds();
 
@@ -248,6 +279,29 @@ $degree = array_fill(0, $next, 0);
 foreach ($arcsFrom as $u => $list) {
     foreach ($list as [$v, $c]) { $degree[$v]++; $degree[$u]++; }
 }
+/*
+ * What a junction costs, from what is actually at it.
+ *
+ * A flat charge everywhere routed us through the middle of cities: measured
+ * against two reference routers, our routes agreed on 83 to 94 per cent of
+ * their length, and where they parted it was always the same shape - we took
+ * the direct line through a centre where both references went round it.
+ *
+ * Scaling the charge by how many junctions were nearby was tried first, on
+ * the theory that density is what a city is. It made things worse, because
+ * density is a proxy and a bad one: it charged a quiet residential grid as
+ * heavily as a high street and cost Nijmegen to Enschede eleven kilometres.
+ *
+ * The data says the thing itself. There are 33,977 traffic signals in this
+ * extract, and once they are matched to the network 4,012 junctions are
+ * signalised - 0.56% of them, and they are concentrated in exactly the places
+ * where we and the reference routers disagreed. A signal is worth about
+ * twenty seconds if you arrive at a random moment in the cycle; a give-way is
+ * worth four.
+ *
+ * Signals that are not at junctions are pedestrian crossings, and they are
+ * not free either - they are most of what makes a high street slow.
+ */
 $charged = 0;
 $penalty = (int) round(JUNCTION_SEC * 10);
 foreach ($arcsFrom as $u => $list) {
