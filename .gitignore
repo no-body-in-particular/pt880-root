@@ -16,3 +16,6 @@ __pycache__/
 # Map server: built data and rendered caches, not sources
 server/map/data/
 server/map/tiles/
+
+# Rust build output
+server/mapd/target/
