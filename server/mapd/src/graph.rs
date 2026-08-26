@@ -198,9 +198,26 @@ pub fn handle(app: &App, r: Request, q: &HashMap<String, String>, gz: bool) {
         // Cutting a box out of the Netherlands takes a moment and the watch
         // asks for one perhaps once a country, so the cache was buying very
         // little and offering anyone on the internet a way to fill the disk.
-        let raw = match std::fs::read(&path) {
-            Ok(b) => b,
+        /*
+         * Mapped, not read.
+         *
+         * Cutting a box needs random access right across the file - the nodes
+         * for a cell are contiguous but the arcs point anywhere - so this
+         * cannot be streamed the way the whole-country reply can. Reading it
+         * instead allocated a copy of the country per request: six concurrent
+         * boxes out of England took the process from 4 MB to 821 MB, measured.
+         *
+         * A mapping costs address space rather than memory, and several
+         * requests for the same country share the same pages through the page
+         * cache, which is where the file already was.
+         */
+        let file = match std::fs::File::open(&path) {
+            Ok(f) => f,
             Err(_) => return send_status(r, 404, "no graph"),
+        };
+        let raw = match unsafe { memmap2::Mmap::map(&file) } {
+            Ok(m) => m,
+            Err(_) => return send_status(r, 500, "cannot map the graph"),
         };
         let body = match subgraph(&raw, w, s, e, n) {
             Some(c) => c,
@@ -221,10 +238,24 @@ pub fn handle(app: &App, r: Request, q: &HashMap<String, String>, gz: bool) {
     // The whole country. The compressed copy is made by build_graph.php, not
     // here: thirty-six megabytes of deflate inside a request is a timeout
     // waiting to happen.
+    /*
+     * Streamed off the disk, not read into memory first.
+     *
+     * These are the largest things this service hands out - England's graph is
+     * 157 MB - and std::fs::read allocated the whole of one per request. Six
+     * concurrent requests took the process from 15 MB to 956 MB, measured, and
+     * the worker pool is the size of the machine, so eight is the ceiling
+     * rather than six. Nobody has to be malicious for it to happen either:
+     * the watch asks for this once per country, and a retry while the first
+     * attempt is still running is two.
+     *
+     * tiny_http reads from the handle as it writes to the socket, so what is
+     * held is a buffer rather than a country.
+     */
     let gzpath = app.data.join(format!("{}.graph.gz", name));
     if gz && gzpath.is_file() {
-        if let Ok(b) = std::fs::read(&gzpath) {
-            let len = b.len();
+        if let Ok(f) = std::fs::File::open(&gzpath) {
+            let len = f.metadata().map(|m| m.len() as usize).ok();
             let _ = r.respond(tiny_http::Response::new(
                 tiny_http::StatusCode(200),
                 vec![
@@ -233,15 +264,27 @@ pub fn handle(app: &App, r: Request, q: &HashMap<String, String>, gz: bool) {
                     header("Vary", "Accept-Encoding"),
                     header("Cache-Control", "public, max-age=2592000"),
                 ],
-                std::io::Cursor::new(b),
-                Some(len),
+                f,
+                len,
                 None,
             ));
             return;
         }
     }
-    match std::fs::read(&path) {
-        Ok(b) => send_bytes(r, b, "application/octet-stream", false),
+    match std::fs::File::open(&path) {
+        Ok(f) => {
+            let len = f.metadata().map(|m| m.len() as usize).ok();
+            let _ = r.respond(tiny_http::Response::new(
+                tiny_http::StatusCode(200),
+                vec![
+                    header("Content-Type", "application/octet-stream"),
+                    header("Cache-Control", "public, max-age=2592000"),
+                ],
+                f,
+                len,
+                None,
+            ));
+        }
         Err(_) => send_status(r, 404, "no graph"),
     }
 }
