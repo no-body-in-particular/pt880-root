@@ -39,34 +39,9 @@ $country = $argv[1] ?? 'netherlands';
 $src = DATA_DIR . "/$country/gis_osm_roads_free_1";
 if (!is_file("$src.shp")) { fwrite(STDERR, "no roads shapefile for $country\n"); exit(1); }
 
-/** Assumed speeds where the data does not say, km/h. Anything absent from
- *  this table is not drivable and is left out of the graph entirely. */
-function drive_speeds(): array {
-    /*
-     * What a car actually averages on each kind of road, not what the sign
-     * says.
-     *
-     * The first version used the speed limit, and the routes came out 25 to
-     * 30 per cent quicker than the reference router - Amsterdam to Utrecht in
-     * 31 minutes against 43. That is not only a wrong arrival time. Cost
-     * decides the route, and overrating town roads against motorways makes
-     * the search prefer the direct way through everywhere rather than the
-     * long way round on a road built for it, which is why our distances came
-     * out shorter than they should have been.
-     *
-     * These are roughly what OSRM's car profile uses, which is derived from
-     * measurement rather than from signage.
-     */
-    return [
-        'motorway' => 95, 'motorway_link' => 60,
-        'trunk' => 80, 'trunk_link' => 50,
-        'primary' => 60, 'primary_link' => 40,
-        'secondary' => 50, 'secondary_link' => 35,
-        'tertiary' => 40, 'tertiary_link' => 30,
-        'unclassified' => 30, 'residential' => 22, 'living_street' => 8,
-        'service' => 12, 'track' => 10, 'unknown' => 25,
-    ];
-}
+/* drive_speeds() lives in lib.php: truelen.php has to filter ways by exactly
+ * the same table this builder does, and two copies of it would drift. */
+
 
 /*
  * What a real junction costs, in seconds.

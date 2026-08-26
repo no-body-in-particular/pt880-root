@@ -137,5 +137,44 @@ for ($i = 1; $i < count($path); $i++) {
     $metres += sqrt(($dla*110540)**2 + ($dlo*111320)**2);
 }
 
+// The graph has a node only where ways meet, so $metres above is a chain of
+// chords across the bends in between - about 5% short across this network.
+// With TRUELEN=1 the arcs are measured again from the shapefile, which is the
+// distance a driver would actually cover.
+$trueKm = null;
+if (getenv('TRUELEN')) {
+    require_once __DIR__ . '/truelen.php';
+    $tab = arc_lengths_cached($country);
+    $sum = 0.0; $missed = 0;
+    for ($i = 1; $i < count($path); $i++) {
+        $a = $path[$i-1]; $b = $path[$i];
+        $ka = key_of(node_lon($raw,$nodesAt,$a), node_lat($raw,$nodesAt,$a));
+        $kb = key_of(node_lon($raw,$nodesAt,$b), node_lat($raw,$nodesAt,$b));
+        $pair = $ka < $kb ? "$ka,$kb" : "$kb,$ka";
+        if (isset($tab[$pair])) { $sum += $tab[$pair]; continue; }
+        // No entry: fall back to the chord rather than dropping the hop.
+        $missed++;
+        $dla = node_lat($raw,$nodesAt,$b) - node_lat($raw,$nodesAt,$a);
+        $dlo = (node_lon($raw,$nodesAt,$b) - node_lon($raw,$nodesAt,$a))
+               * cos(deg2rad(node_lat($raw,$nodesAt,$a)));
+        $sum += sqrt(($dla*110540)**2 + ($dlo*111320)**2);
+    }
+    $trueKm = $sum / 1000;
+    if ($missed) { fwrite(STDERR, "truelen: $missed of " . (count($path)-1) . " hops fell back to the chord\n"); }
+}
+
 printf("route: %.1f km, %.0f min, %d hops, %d nodes settled, %.0f ms\n",
-    $metres/1000, $dist[$t]/600, count($path), $visits, $ms);
+    $trueKm ?? $metres/1000, $dist[$t]/600, count($path), $visits, $ms);
+// GEOJSON=1 prints the path so it can be laid over a reference router's, which
+// is the only way to tell "a different road" from "the same road measured
+// differently".
+if (getenv('GEOJSON')) {
+    $c = [];
+    foreach ($path as $n) {
+        $c[] = sprintf('[%.6f,%.6f]', node_lon($raw,$nodesAt,$n), node_lat($raw,$nodesAt,$n));
+    }
+    file_put_contents(getenv('GEOJSON'), '[' . implode(',', $c) . ']');
+}
+if ($trueKm !== null) {
+    printf("chord: %.1f km (%.1f%% short)\n", $metres/1000, ($trueKm - $metres/1000)/$trueKm*100);
+}

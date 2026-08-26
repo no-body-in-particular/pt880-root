@@ -34,6 +34,8 @@ pub struct App {
     /// Whether assembled blocks are written to disk. Off by default - see
     /// block_bytes.
     pub disk_cache: bool,
+    /// Base URL of the OSRM used by /route.php, without a trailing slash.
+    pub osrm: String,
     /// A few recent blocks, for the watch retrying one it failed to read.
     /// Held behind an Arc so serving one costs a refcount rather than a copy
     /// of up to a megabyte and a half.
@@ -415,11 +417,18 @@ fn main() {
     let root = PathBuf::from(root);
 
     let disk_cache = std::env::var("MAP_DISK_CACHE").map(|v| v == "1").unwrap_or(false);
+    // Where /route.php goes when the watch could not route for itself. The
+    // default is the public demo server, which is not meant to be depended
+    // on; point this at your own OSRM in production.
+    let osrm = std::env::var("MAP_OSRM")
+        .unwrap_or_else(|_| "https://router.project-osrm.org".into());
+    let osrm = osrm.trim_end_matches('/').to_string();
     let app = Arc::new(App {
         stores: store::Stores::new(root.join("data")),
         tiles: root.join("tiles"),
         data: root.join("data"),
         disk_cache,
+        osrm,
         recent: std::sync::Mutex::new(Vec::new()),
     });
 

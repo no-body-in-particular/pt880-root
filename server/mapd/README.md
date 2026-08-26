@@ -61,6 +61,14 @@ Reads `MAP_ROOT` (default `/var/www/hiawatha/map`) and `MAP_ADDR` (default
 `127.0.0.1:8088`). Runs as `hiawatha` so the tile cache it writes is the one
 the web server can read.
 
+`MAP_OSRM` (default `https://router.project-osrm.org`) is where `/route.php`
+goes. The watch routes on the graph on its own card whenever it has one, so
+this endpoint only answers for a country that has not been downloaded - but
+that is exactly the case where the watch cannot fall back on itself, so it is
+worth pointing at an OSRM you run. The default is the project's demo server,
+which is explicitly not offered for production use: it rate-limits, it makes
+no uptime promise, and it sees every destination the watch is sent to.
+
 ## Going back
 
 The PHP is still in `/var/www/hiawatha/map` and still works. Comment out the

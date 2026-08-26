@@ -244,9 +244,18 @@ pub fn handle(app: &App, r: Request, q: &HashMap<String, String>, gz: bool) {
     }
 }
 
-/// Routing, proxied from the public OSRM demo server and cached for a day.
-/// The watch routes on its own graph when it has one; this is the fallback
-/// for when it does not.
+/// Routing, proxied to an OSRM instance and cached for a day.
+///
+/// The watch routes on its own graph when it has one, which is nearly always:
+/// this endpoint is the fallback for a country whose graph is not on the
+/// card. That matters for what it is allowed to depend on - a fallback that
+/// is down leaves the watch with no route at all in exactly the case where it
+/// could not compute one itself.
+///
+/// It defaults to the public demo server, which is convenient and is
+/// explicitly not offered for production use: it rate-limits, it is not
+/// guaranteed to be up, and it is a third party learning every destination
+/// this watch is sent to. Set MAP_OSRM to a host you run to avoid all three.
 pub fn route(app: &App, r: Request, q: &HashMap<String, String>) {
     let flat: f64 = num(q, "flat", f64::NAN);
     let flon: f64 = num(q, "flon", f64::NAN);
@@ -274,9 +283,9 @@ pub fn route(app: &App, r: Request, q: &HashMap<String, String>) {
     }
 
     let url = format!(
-        "https://router.project-osrm.org/route/v1/driving/{:.6},{:.6};{:.6},{:.6}\
+        "{}/route/v1/driving/{:.6},{:.6};{:.6},{:.6}\
          ?overview=full&geometries=geojson&steps=true",
-        flon, flat, tlon, tlat
+        app.osrm, flon, flat, tlon, tlat
     );
     let body = match ureq::get(&url).timeout(std::time::Duration::from_secs(20)).call() {
         Ok(res) => res.into_string().unwrap_or_default(),
