@@ -6,9 +6,7 @@ device (`sp9820e_1h10` / `sl8521e_1h10ll_watch_native`, Android 4.4.4).
 Tooling to dump, patch and reflash it, so you get adb and a root shell on
 hardware you own.
 
-<img src="docs/pt880.png" width="420" alt="pt880 tracker: rugged wrist unit with a
-small square screen, a camera above it, two buttons on the right edge and a
-perforated locking strap">
+<img src="docs/pt880.png" width="420" alt="pt880 tracker: rugged wrist unit with a small square screen, a camera above it, two buttons on the right edge and a perforated locking strap">
 
 The two buttons on the right edge are the entire input surface — there is no
 working touchscreen. That shapes everything in
