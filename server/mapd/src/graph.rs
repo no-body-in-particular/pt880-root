@@ -135,7 +135,19 @@ pub fn subgraph(raw: &[u8], w: f64, s: f64, e: f64, n: f64) -> Option<Vec<u8>> {
 
     let mut out = Vec::with_capacity(56 + out_nodes.len() + adj.len() + out_arcs.len() + grid.len());
     out.extend_from_slice(b"WGR2");
-    out.extend_from_slice(&[2u8, 0, 0, 0]);
+    // Version, a spare byte, and the fastest way in the graph - carried over
+    // from the country it was cut out of rather than left at zero.
+    //
+    // A* is only correct if its estimate of what is left never exceeds the
+    // truth, and that estimate is the straight line divided by this. Zero
+    // means "the file does not say", which sends the router to its
+    // conservative fallback of 140 km/h - a loose bound for a car and an
+    // absurd one for a bicycle, whose real answer is 18. The boxed graph is
+    // what the watch actually routes on, so it was the one place the figure
+    // mattered most and the only place it was being dropped.
+    let maxkmh = ((raw[6] as u16) << 8) | raw[7] as u16;
+    out.extend_from_slice(&[2u8, 0]);
+    out.extend_from_slice(&maxkmh.to_be_bytes());
     out.extend_from_slice(&(kept as u32).to_be_bytes());
     out.extend_from_slice(&at.to_be_bytes());
     out.extend_from_slice(&(ncols as u32).to_be_bytes());
@@ -165,6 +177,14 @@ fn graph_file(app: &App, q: &HashMap<String, String>) -> Option<(String, PathBuf
     if !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
         return None;
     }
+    // Two networks per country: what a car may drive and what a bicycle may
+    // ride. They barely overlap - a motorway is in one and 225,516 cycleways
+    // are in the other - so they are separate files, and the watch asks for
+    // whichever mode it is in.
+    let name = match q.get("mode").map(|s| s.as_str()) {
+        Some("bike") => format!("{}-bike", name),
+        _ => name,
+    };
     let p = app.data.join(format!("{}.graph", name));
     if p.is_file() {
         Some((name, p))

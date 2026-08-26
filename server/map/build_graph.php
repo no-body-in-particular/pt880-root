@@ -98,7 +98,25 @@ function key_of(float $lon, float $lat): int {
 
 require_once __DIR__ . '/layers.php';
 
-$speeds = drive_speeds();
+/*
+ * Which network this graph is of.
+ *
+ *     php build_graph.php netherlands          the roads a car may drive
+ *     php build_graph.php netherlands bike     the ways a bicycle may ride
+ *
+ * Two graphs rather than one with a flag per arc: they barely overlap - a
+ * motorway is in neither's opposite and the Netherlands has 225,516
+ * cycleways that a car graph has no reason to carry - and the watch only ever
+ * has one mode loaded, so a combined file would be twice the card and twice
+ * the memory-mapped pages for nothing.
+ */
+$mode = strtolower($argv[2] ?? 'car');
+if ($mode !== 'car' && $mode !== 'bike') {
+    fwrite(STDERR, "usage: build_graph.php <country> [car|bike]\n");
+    exit(1);
+}
+$speeds = speeds_for($mode);
+fwrite(STDERR, "building the $mode network for $country\n");
 
 // ---------------------------------------------------------------- pass one
 
@@ -200,7 +218,17 @@ while (ftell($shp) < $fileLen) {
 
     $a = attrs($dbf, $hd, $fields, $rec);
     if (!isset($speeds[$a['fclass']])) { continue; }
-    $kmh = $a['maxspeed'] > 0 ? $a['maxspeed'] : $speeds[$a['fclass']];
+    /*
+     * A signposted limit is a car's limit, and means nothing to a bicycle.
+     *
+     * Taking it anyway made the bike graph claim its fastest way was 130 km/h
+     * - a cycleway running beside a motorway inherits the motorway's tag - and
+     * a router told a cyclist does 130 will send them the long way round on
+     * the theory that it is quicker. In bike mode the table is the whole
+     * answer.
+     */
+    $kmh = ($mode === 'car' && $a['maxspeed'] > 0)
+            ? $a['maxspeed'] : $speeds[$a['fclass']];
     if ($kmh < 5) { $kmh = 5; }
     // The fastest speed anywhere in this graph, recorded so the router does
     // not have to guess one. See the header write below.
@@ -303,7 +331,9 @@ foreach ($arcsFrom as $u => $list) {
  * not free either - they are most of what makes a high street slow.
  */
 $charged = 0;
-$penalty = (int) round(JUNCTION_SEC * 10);
+// A bicycle gives way at the same junctions but rejoins in a fraction of
+// the time: no gearbox, no gap in the traffic wide enough for a car.
+$penalty = (int) round(($mode === 'bike' ? JUNCTION_SEC / 2 : JUNCTION_SEC) * 10);
 foreach ($arcsFrom as $u => $list) {
     foreach ($list as $i => [$v, $c]) {
         if ($degree[$v] >= 3) {
@@ -716,7 +746,7 @@ for ($c = 1; $c <= $cols * $rows; $c++) { $cellOf[$c] += $cellOf[$c - 1]; }
  * somebody notices and builds it again. rename() on the same filesystem is
  * atomic, so a reader sees either the old graph or the new one.
  */
-$finalPath = DATA_DIR . "/$country.graph";
+$finalPath = DATA_DIR . "/" . graph_name($country, $mode) . ".graph";
 $tmpPath = $finalPath . '.new';
 $out = fopen($tmpPath, 'wb');
 if ($out === false) { fwrite(STDERR, "cannot write $tmpPath\n"); exit(1); }
@@ -785,7 +815,7 @@ if (!rename($tmpPath, $finalPath)) {
 // a CGI timeout waiting to happen.
 // Same care as the graph itself: this is what the watch downloads, and a
 // half-written one is worse than an old one.
-$gz = DATA_DIR . "/$country.graph.gz";
+$gz = DATA_DIR . "/" . graph_name($country, $mode) . ".graph.gz";
 $gzTmp = $gz . '.new';
 $fp = gzopen($gzTmp, 'wb6');
 $in = fopen($finalPath, 'rb');
@@ -801,5 +831,5 @@ if (!rename($gzTmp, $gz)) {
 
 $size = filesize($finalPath);
 fwrite(STDERR, sprintf("wrote %s.graph: %d nodes, %d arcs, %.1f MB (%.1f MB gzipped), %.0fs\n",
-    $country, $next, $at, $size / 1048576, filesize($gz) / 1048576,
+    graph_name($country, $mode), $next, $at, $size / 1048576, filesize($gz) / 1048576,
     microtime(true) - $t0));

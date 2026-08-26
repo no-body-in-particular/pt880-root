@@ -13,6 +13,12 @@ require_once __DIR__ . '/lib.php';
 ini_set('memory_limit', '4G');
 
 $country = $argv[1] ?? 'netherlands';
+// A trailing "bike" picks the cycling network instead of the driving one.
+$last = $argv[count($argv) - 1] ?? '';
+if ($last === 'bike' || $last === 'car') {
+    $country = graph_name($country, $last);
+    array_pop($argv);
+}
 $flat = (float) ($argv[2] ?? 52.3702); $flon = (float) ($argv[3] ?? 4.8952);
 $tlat = (float) ($argv[4] ?? 52.0859); $tlon = (float) ($argv[5] ?? 5.1089);
 

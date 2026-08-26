@@ -774,3 +774,46 @@ function ground(float $la1, float $lo1, float $la2, float $lo2): float {
     $dx = ($lo2 - $lo1) * metres_per_lon($mid);
     return sqrt($dx * $dx + $dy * $dy);
 }
+
+/**
+ * What a cyclist averages on each kind of way, km/h.
+ *
+ * A different network, not the same one ridden slower. Motorways and trunk
+ * roads are missing because they are not legal to ride on and a router that
+ * offers one is worse than no router; cycleways are missing from the driving
+ * table for the same reason in reverse. What is left overlaps, but the speeds
+ * are flat rather than graded: a bicycle does not go faster on a secondary
+ * road than a residential one, so the shape of a cycling route comes from
+ * distance and from which ways exist, not from a hierarchy of speeds.
+ *
+ * Steps and bridleways are left out. Both can be walked with a bicycle and
+ * neither is a route anyone wants to be sent along.
+ */
+function bike_speeds(): array {
+    return [
+        'cycleway'       => 18,
+        'primary'        => 16, 'primary_link'   => 14,
+        'secondary'      => 17, 'secondary_link' => 15,
+        'tertiary'       => 17, 'tertiary_link'  => 15,
+        'unclassified'   => 16,
+        'residential'    => 16,
+        'living_street'  => 12,
+        'pedestrian'     => 8,
+        'service'        => 12,
+        'track'          => 10,
+        'track_grade1'   => 14, 'track_grade2' => 11, 'track_grade3' => 9,
+        'track_grade4'   => 8,  'track_grade5' => 7,
+        'path'           => 11,
+        'unknown'        => 12,
+    ];
+}
+
+/** The speed table for a mode: 'car' or 'bike'. */
+function speeds_for(string $mode): array {
+    return $mode === 'bike' ? bike_speeds() : drive_speeds();
+}
+
+/** Where a mode's graph lives. Car keeps the plain name it always had. */
+function graph_name(string $country, string $mode): string {
+    return $mode === 'bike' ? "$country-bike" : $country;
+}
