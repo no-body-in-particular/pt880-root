@@ -42,11 +42,26 @@ pub fn encode(pts: &[Point], area: Bbox) -> Vec<u8> {
     // An empty answer is still a valid file: the watch takes it as "nothing
     // here", which is different from "no layer" and much better than an error
     // it has to decide what to do about.
-    let (minx, miny) = (area.0, area.1);
-    let (maxx, maxy) = (area.2.max(area.0 + CELL_DEG), area.3.max(area.1 + CELL_DEG));
-
-    let cols = (((maxx - minx) / CELL_DEG).ceil() as usize).max(1);
-    let rows = (((maxy - miny) / CELL_DEG).ceil() as usize).max(1);
+    // Snapped out to whole cells before anything else is computed.
+    //
+    // The reader has no cell size of its own: it works one out by dividing the
+    // area by the number of cells, which is only the size used here if the
+    // area is a whole number of them. It was not, and the two disagreed by
+    // 0.3% - enough to put a lookup in the neighbouring cell near the edges of
+    // a country. Nothing broke, because a lookup reads a ring of cells around
+    // the one it wants and that absorbed the error, but it was one radius
+    // change away from breaking and would have looked like missing data rather
+    // than arithmetic.
+    //
+    // Snapping makes the file self-describing: whatever constant either side
+    // uses, (maxx - minx) / cols is exactly the size the points were bucketed
+    // with.
+    let minx = (area.0 / CELL_DEG).floor() * CELL_DEG;
+    let miny = (area.1 / CELL_DEG).floor() * CELL_DEG;
+    let cols = ((((area.2 - minx) / CELL_DEG).ceil()) as usize).max(1);
+    let rows = ((((area.3 - miny) / CELL_DEG).ceil()) as usize).max(1);
+    let maxx = minx + cols as f64 * CELL_DEG;
+    let maxy = miny + rows as f64 * CELL_DEG;
 
     let mut buckets: Vec<Vec<usize>> = vec![Vec::new(); cols * rows];
     for (i, p) in pts.iter().enumerate() {
