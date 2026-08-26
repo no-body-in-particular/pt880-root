@@ -95,6 +95,17 @@ fn num<T: std::str::FromStr>(q: &HashMap<String, String>, k: &str, d: T) -> T {
     q.get(k).and_then(|v| v.parse::<T>().ok()).unwrap_or(d)
 }
 
+/// A coordinate that is actually on the planet.
+///
+/// "inf" parses as a float and is not NaN, so a check for NaN alone lets it
+/// through - and it then goes into a URL sent to the routing service, or into
+/// a bounding box where every comparison against it is false and the clamping
+/// quietly falls through to the whole country. Neither is dangerous, but both
+/// are work done on nonsense, and a request that means nothing should be
+/// refused rather than answered at length.
+pub fn sane_lat(v: f64) -> bool { v.is_finite() && v >= -90.0 && v <= 90.0 }
+pub fn sane_lon(v: f64) -> bool { v.is_finite() && v >= -180.0 && v <= 180.0 }
+
 fn header(k: &str, v: &str) -> Header {
     Header::from_bytes(k.as_bytes(), v.as_bytes()).unwrap()
 }

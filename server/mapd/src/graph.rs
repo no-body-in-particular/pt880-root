@@ -179,11 +179,15 @@ pub fn handle(app: &App, r: Request, q: &HashMap<String, String>, gz: bool) {
 
     if q.contains_key("w") && q.contains_key("s") && q.contains_key("e") && q.contains_key("n") {
         let (w, s, e, n) = (
-            num::<f64>(q, "w", 0.0),
-            num::<f64>(q, "s", 0.0),
-            num::<f64>(q, "e", 0.0),
-            num::<f64>(q, "n", 0.0),
+            num::<f64>(q, "w", f64::NAN),
+            num::<f64>(q, "s", f64::NAN),
+            num::<f64>(q, "e", f64::NAN),
+            num::<f64>(q, "n", f64::NAN),
         );
+        if !crate::sane_lon(w) || !crate::sane_lon(e)
+                || !crate::sane_lat(s) || !crate::sane_lat(n) || w > e || s > n {
+            return send_status(r, 400, "bad box");
+        }
         // Cut fresh every time, and not written to disk.
         //
         // It used to be cached per bounding box, which means one file per
@@ -248,7 +252,8 @@ pub fn route(app: &App, r: Request, q: &HashMap<String, String>) {
     let flon: f64 = num(q, "flon", f64::NAN);
     let tlat: f64 = num(q, "tlat", f64::NAN);
     let tlon: f64 = num(q, "tlon", f64::NAN);
-    if flat.is_nan() || flon.is_nan() || tlat.is_nan() || tlon.is_nan() {
+    if !crate::sane_lat(flat) || !crate::sane_lon(flon)
+            || !crate::sane_lat(tlat) || !crate::sane_lon(tlon) {
         return send_status(r, 400, "bad request");
     }
 
