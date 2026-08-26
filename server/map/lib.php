@@ -228,6 +228,42 @@ function open_store(string $country): ?SQLite3 {
     return $db;
 }
 
+/**
+ * Which country's data covers this point.
+ *
+ * Tile coordinates are global - a z15 tile in Germany has the same numbers
+ * whoever asks for it - so the watch has no business knowing which database a
+ * tile comes out of. It asks for a place; the server works out which store
+ * holds it. That is also what lets a cached tile from one trip be reused on
+ * another, and what makes crossing a border a non-event.
+ *
+ * @return country name, or null if nothing here covers it
+ */
+function country_at(float $lon, float $lat): ?string {
+    static $boxes = null;
+    if ($boxes === null) {
+        $boxes = [];
+        foreach (countries() as $c) {
+            $db = open_store($c);
+            if ($db === null) { continue; }
+            $m = [];
+            $r = $db->query('SELECT k, v FROM meta');
+            while ($row = $r->fetchArray(SQLITE3_ASSOC)) { $m[$row['k']] = $row['v']; }
+            if (!isset($m['minx'])) { continue; }
+            $boxes[$c] = [(float) $m['minx'], (float) $m['miny'],
+                          (float) $m['maxx'], (float) $m['maxy']];
+        }
+    }
+    $best = null; $bestArea = INF;
+    foreach ($boxes as $c => $b) {
+        if ($lon < $b[0] || $lon > $b[2] || $lat < $b[1] || $lat > $b[3]) { continue; }
+        // Overlapping extracts: prefer the smaller, which is the more local.
+        $area = ($b[2] - $b[0]) * ($b[3] - $b[1]);
+        if ($area < $bestArea) { $bestArea = $area; $best = $c; }
+    }
+    return $best;
+}
+
 function store_exists(string $country): bool {
     return is_file(DATA_DIR . '/' . basename($country) . '.db');
 }

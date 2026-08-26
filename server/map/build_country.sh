@@ -50,19 +50,22 @@ unzip -o -q "$ZIP" -d "$SRC" \
     "gis_osm_waterways_free_1.*" || true
 
 echo "== roads"
-php import.php "$NAME" "$SRC/gis_osm_roads_free_1.shp"
+php import.php "$NAME" "$SRC/gis_osm_roads_free_1"
 echo "== ground cover"
 php import_areas.php "$NAME"
 echo "== buildings"
 php import_buildings.php "$NAME"
 echo "== railways and waterways"
 php import_lines.php "$NAME"
+echo "== routing graph"
+php build_graph.php "$NAME"
 
 # The web server has to be able to write the tile cache for this country.
 if id hiawatha >/dev/null 2>&1; then
     chown -R hiawatha:hiawatha "$DATA/$NAME.db" 2>/dev/null || true
 fi
 chmod 644 "$DATA/$NAME.db"
+chmod 644 "$DATA/$NAME.graph" "$DATA/$NAME.graph.gz" 2>/dev/null || true
 
 echo
 echo "== done: $NAME"

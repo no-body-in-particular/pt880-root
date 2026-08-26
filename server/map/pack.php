@@ -33,9 +33,20 @@ $y = (int) ($_GET['y'] ?? -1);
 $w = max(1, min(32, (int) ($_GET['w'] ?? 16)));
 $h = max(1, min(32, (int) ($_GET['h'] ?? 16)));
 
-if ($z < 1 || $z > 18 || $x < 0 || $y < 0 || !store_exists($c)) {
+if ($z < 1 || $z > 18 || $x < 0 || $y < 0) {
     http_response_code(400);
     exit('bad request');
+}
+
+// The watch need not know which country a tile belongs to - tile numbers are
+// global. If it does not say, work it out from the middle of the block.
+if ($c === '' || !store_exists($c)) {
+    $mid = tile_bbox($z, $x + intdiv($w, 2), $y + intdiv($h, 2));
+    $c = country_at(($mid[0] + $mid[2]) / 2, ($mid[1] + $mid[3]) / 2) ?? '';
+    if ($c === '') {
+        http_response_code(404);
+        exit('no map here');
+    }
 }
 if ($w * $h > MAX_TILES) {
     http_response_code(400);
