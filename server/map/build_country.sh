@@ -31,6 +31,15 @@ mkdir -p "$SRC"
 if [ ! -s "$ZIP" ]; then
     echo "== downloading $URL"
     curl -fL --retry 3 -o "$ZIP.part" "$URL"
+    # Geofabrik answers with an HTML page, not a 404, when a region has no
+    # shapefile - so a "successful" download can be nine kilobytes of
+    # apology. Check it is a zip before pretending it worked.
+    if [ "$(head -c2 "$ZIP.part")" != "PK" ]; then
+        echo "no shapefile published for $REGION - check the region path" >&2
+        echo "  (list what exists with ./list_regions.sh)" >&2
+        rm -f "$ZIP.part"
+        exit 1
+    fi
     mv "$ZIP.part" "$ZIP"
 else
     echo "== $ZIP already here"
@@ -66,6 +75,15 @@ if id hiawatha >/dev/null 2>&1; then
 fi
 chmod 644 "$DATA/$NAME.db"
 chmod 644 "$DATA/$NAME.graph" "$DATA/$NAME.graph.gz" 2>/dev/null || true
+
+# The extract is only needed while importing. Germany's shapefiles unpack to
+# something like fifteen gigabytes, and once the database and graph are built
+# not one byte of it is read again - it can always be downloaded afresh.
+if [ "${KEEP_SOURCE:-0}" != "1" ]; then
+    echo "== removing the extracted shapefiles"
+    rm -rf "$SRC"
+    rm -f "$ZIP"
+fi
 
 echo
 echo "== done: $NAME"
