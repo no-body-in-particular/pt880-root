@@ -344,6 +344,7 @@ pub fn overlaps(pts: &[Pt], w: f64, s: f64, e: f64, n: f64) -> bool {
 pub struct Stores {
     pub dir: PathBuf,
     countries: RwLock<HashMap<String, &'static Country>>,
+    names: RwLock<Option<Vec<String>>>,
 }
 
 impl Stores {
@@ -351,10 +352,29 @@ impl Stores {
         Stores {
             dir,
             countries: RwLock::new(HashMap::new()),
+            names: RwLock::new(None),
         }
     }
 
+    /// The countries present.
+    ///
+    /// Cached: this used to read the directory on every request that did not
+    /// name a country, which is a syscall per request to answer a question
+    /// whose answer changes when someone builds a new country - about once a
+    /// week, and never while a request is in flight.
     pub fn names(&self) -> Vec<String> {
+        {
+            let c = self.names.read().unwrap();
+            if let Some(v) = c.as_ref() {
+                return v.clone();
+            }
+        }
+        let out = self.scan_names();
+        *self.names.write().unwrap() = Some(out.clone());
+        out
+    }
+
+    fn scan_names(&self) -> Vec<String> {
         let mut out = Vec::new();
         if let Ok(rd) = std::fs::read_dir(&self.dir) {
             for e in rd.flatten() {

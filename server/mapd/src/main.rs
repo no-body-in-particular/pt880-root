@@ -35,13 +35,20 @@ pub struct App {
     /// block_bytes.
     pub disk_cache: bool,
     /// A few recent blocks, for the watch retrying one it failed to read.
-    pub recent: std::sync::Mutex<Vec<(String, Vec<u8>)>>,
+    /// Held behind an Arc so serving one costs a refcount rather than a copy
+    /// of up to a megabyte and a half.
+    pub recent: std::sync::Mutex<Vec<(String, Arc<Vec<u8>>)>>,
 }
 
-/// How many assembled blocks to keep in memory. Twenty of them is a few
-/// megabytes and covers a retry, which is the only repeat that actually
-/// happens: the watch stores what it downloads, so it does not ask twice.
-const RECENT_BLOCKS: usize = 20;
+/// How much of the recent blocks to keep in memory.
+///
+/// Bounded by bytes rather than by count, because a block is anywhere from a
+/// hundred bytes over open sea to a megabyte and a half over a city - twenty
+/// of the former is nothing and twenty of the latter is thirty megabytes.
+/// This covers the one repeat that actually happens, the watch retrying a
+/// block it failed to read; it does not ask twice otherwise, because it
+/// stores what it downloads.
+const RECENT_BYTES: usize = 24 * 1024 * 1024;
 
 /// The most tiles one request may ask to have rendered.
 const MAX_TILES: i32 = 400;
@@ -224,7 +231,7 @@ fn block_bytes(app: &App, c: &'static store::Country, z: u8, bx: i32, by: i32) -
     {
         let recent = app.recent.lock().unwrap();
         if let Some((_, b)) = recent.iter().find(|(k, _)| *k == key) {
-            return b.clone();
+            return (**b).clone();
         }
     }
 
@@ -272,12 +279,17 @@ fn block_bytes(app: &App, c: &'static store::Country, z: u8, bx: i32, by: i32) -
         }
     }
 
-    let mut recent = app.recent.lock().unwrap();
-    if recent.len() >= RECENT_BLOCKS {
-        recent.remove(0);
+    let shared = Arc::new(body);
+    {
+        let mut recent = app.recent.lock().unwrap();
+        recent.push((key, shared.clone()));
+        let mut held: usize = recent.iter().map(|(_, b)| b.len()).sum();
+        while held > RECENT_BYTES && recent.len() > 1 {
+            held -= recent[0].1.len();
+            recent.remove(0);
+        }
     }
-    recent.push((key, body.clone()));
-    body
+    (*shared).clone()
 }
 
 fn handle(app: &App, r: Request) {
