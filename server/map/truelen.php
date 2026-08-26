@@ -99,11 +99,7 @@ function arc_lengths(string $country): array {
         $run = 0.0; $px = null; $py = null; $ak = null;
         for ($i = 0; $i < $n; $i++) {
             $x = $raw[$i*2+1]; $y = $raw[$i*2+2];
-            if ($px !== null) {
-                $dx = ($x-$px) * 111320 * cos(deg2rad(($y+$py)/2));
-                $dy = ($y-$py) * 110540;
-                $run += sqrt($dx*$dx + $dy*$dy);
-            }
+            if ($px !== null) { $run += ground($py, $px, $y, $x); }
             $px = $x; $py = $y;
             $k = key_of($x, $y);
             if (!isset($node[$k])) { continue; }

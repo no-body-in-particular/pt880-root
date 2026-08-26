@@ -57,6 +57,10 @@ if (!is_file("$src.shp")) { fwrite(STDERR, "no roads shapefile for $country\n");
  */
 const JUNCTION_SEC = 4.0;
 
+/** The fewest nodes a piece of the network can have and still be somewhere
+ *  rather than an artifact. See the pruning pass for where this comes from. */
+const MIN_COMPONENT = 200;
+
 /** Quantised to about a centimetre; shapefile coordinates of the same OSM
  *  node are bit-identical, but rounding guards against a rebuilt extract. */
 function key_of(float $lon, float $lat): int {
@@ -152,6 +156,7 @@ $arcCount = 0;
 
 fseek($shp, 100);
 $rec = 0; $edges = 0;
+$maxKmh = 0;
 
 while (ftell($shp) < $fileLen) {
     $rh = fread($shp, 8);
@@ -166,6 +171,9 @@ while (ftell($shp) < $fileLen) {
     if (!isset($speeds[$a['fclass']])) { continue; }
     $kmh = $a['maxspeed'] > 0 ? $a['maxspeed'] : $speeds[$a['fclass']];
     if ($kmh < 5) { $kmh = 5; }
+    // The fastest speed anywhere in this graph, recorded so the router does
+    // not have to guess one. See the header write below.
+    if ($kmh > $maxKmh) { $maxKmh = $kmh; }
     $mps = $kmh / 3.6;
 
     // 'B' both ways, 'F' along the geometry, 'T' against it.
@@ -189,9 +197,7 @@ while (ftell($shp) < $fileLen) {
         if ($px !== null) {
             // Along the ground, not across the bounding box: a way bent round
             // a corner is longer than the line between its ends.
-            $dx = ($x - $px) * 111320 * cos(deg2rad(($y + $py) / 2));
-            $dy = ($y - $py) * 110540;
-            $runM += sqrt($dx * $dx + $dy * $dy);
+            $runM += ground($py, $px, $y, $x);
         }
         $px = $x; $py = $y;
 
@@ -254,6 +260,7 @@ foreach ($arcsFrom as $u => $list) {
     }
 }
 fwrite(STDERR, sprintf("junction charge applied to %d of %d arcs\n", $charged, $arcCount));
+fwrite(STDERR, sprintf("fastest road in this graph: %d km/h\n", $maxKmh));
 unset($degree);
 
 // -------------------------------------------------- keep what can be reached
@@ -280,7 +287,8 @@ unset($degree);
 fwrite(STDERR, "finding the connected network...\n");
 
 $comp = array_fill(0, $next, -1);
-$bestComp = -1; $bestSize = 0; $components = 0;
+$compSize = [];
+$components = 0;
 
 for ($seed = 0; $seed < $next; $seed++) {
     if ($comp[$seed] >= 0) { continue; }
@@ -303,18 +311,283 @@ for ($seed = 0; $seed < $next; $seed++) {
             }
         }
     }
-    if ($size > $bestSize) { $bestSize = $size; $bestComp = $components; }
+    $compSize[$components] = $size;
     $components++;
 }
 
-fwrite(STDERR, sprintf("%d components; keeping the largest, %d of %d nodes (%.1f%%)\n",
-    $components, $bestSize, $next, 100.0 * $bestSize / $next));
+/*
+ * Everything big enough to be a road network, not only the biggest one.
+ *
+ * This kept the largest component and dropped the rest, which is right for a
+ * car park and wrong for an island: it deleted Texel, Terschelling and the
+ * rest of the Wadden from the Dutch graph, leaving a watch on Texel snapping
+ * to a node ten kilometres away across the water and routing through the sea
+ * to reach it. Scotland is worse - Lewis, Orkney, Shetland and Islay are
+ * between them a twentieth of its roads, and all of them went.
+ *
+ * A ferry is not a road and the search should still refuse to cross one. But
+ * refusing to cross it is a different thing from pretending the far side has
+ * no roads on it.
+ *
+ * The line between an island and an artifact is size. Scotland's components
+ * fall into twelve with a thousand nodes or more and eight thousand with
+ * fewer than fifty; there is nothing in between to argue about.
+ */
+$keptNodes = 0;
+foreach ($compSize as $size) { if ($size >= MIN_COMPONENT) { $keptNodes += $size; } }
+$keptComps = count(array_filter($compSize, function ($n) { return $n >= MIN_COMPONENT; }));
+
+fwrite(STDERR, sprintf("%d components; keeping %d of them with %d or more nodes, "
+    . "%d of %d nodes (%.1f%%)\n",
+    $components, $keptComps, MIN_COMPONENT, $keptNodes, $next,
+    100.0 * $keptNodes / $next));
+
+/*
+ * Ferries.
+ *
+ * The road data has no ferries in it - Geofabrik's roads layer is highways
+ * and nothing else - so without this an island is a piece of network with no
+ * way in. Keeping the islands rather than deleting them fixed half of that:
+ * a watch on Texel now finds a road under it. This is the other half, so that
+ * it can also be told how to get home.
+ *
+ * What the data does have is ferry terminals, as points: 732 of them in the
+ * Netherlands. A terminal on its own says nothing about where it sails to,
+ * but a pair of them does, given one more fact the graph already knows -
+ * which piece of the network each one stands on.
+ *
+ *   - Two terminals on opposite banks of a river that is bridged upstream sit
+ *     on the same piece. There is a ferry there, and a car can already get
+ *     across without it, so nothing is added and nothing is lost.
+ *   - Two terminals on pieces that do not otherwise touch are the interesting
+ *     case, and the shortest such pair between any two pieces is the crossing
+ *     that joins them.
+ *
+ * That is a guess, and it can be wrong - two islands whose terminals happen
+ * to face each other with no service between them would be joined. It is
+ * bounded by only ever adding one crossing per pair of pieces, by refusing
+ * any longer than MAX_FERRY_M, and by charging what a ferry actually costs.
+ *
+ * The charge matters as much as the link. A crossing is not a fast road: it
+ * is a wait for a sailing, then a slow boat. FERRY_WAIT_SEC is the half of a
+ * timetable you expect to lose on average plus loading, and at that price the
+ * search takes a ferry when there is no road and never as a shortcut.
+ */
+
+/** How far a terminal can be from a road before it is not that road's. */
+const FERRY_SNAP_M = 1500;
+
+/**
+ * The longest crossing this will infer.
+ *
+ * Two numbers meet here and the smaller wins. The first is judgement: a pair
+ * of terminals a few kilometres apart across a strait is good evidence of a
+ * ferry, and a pair three hundred kilometres apart is not evidence of
+ * anything - Aberdeen and Lerwick are not something to infer from a map.
+ *
+ * The second is arithmetic, and it is the binding one. An arc costs sixteen
+ * bits of deciseconds, so the most any arc can be worth is 109 minutes. Half
+ * an hour of that is the wait, leaving 46 km of sailing before the cost
+ * silently clamps - and a clamped ferry is worse than no ferry, because it
+ * reads as cheaper than it is and the search will choose it over a drive.
+ *
+ * So 45 km, which covers every crossing in the Wadden and the Channel and
+ * most of the Hebrides. Ullapool to Stornoway is 70 and is not inferred; Lewis
+ * stays a piece of network you can drive around but not reach, which is what
+ * the data actually supports.
+ */
+const MAX_FERRY_M = 45000;
+
+/** A car ferry does about 35 km/h, and you wait for it. */
+const FERRY_MPS = 35 / 3.6;
+const FERRY_WAIT_SEC = 1800;
+
+/**
+ * Join pieces of the network that have ferry terminals facing each other.
+ *
+ * @param array $comp      component id per node
+ * @param array $compSize  node count per component
+ * @return int how many crossings were added
+ */
+function add_ferries(string $country, array &$arcsFrom, array &$backFrom,
+                     array $lat, array $lon, int $next,
+                     array $comp, array $compSize, int &$arcCount): int {
+    $src = DATA_DIR . "/$country/gis_osm_transport_free_1";
+    if (!is_file("$src.shp") || !is_file("$src.dbf")) {
+        fwrite(STDERR, "no transport layer for $country; no ferries added\n");
+        return 0;
+    }
+
+    // ---- terminals
+    $dbf = fopen("$src.dbf", 'rb');
+    $h = fread($dbf, 32);
+    $hd = unpack('Vrecords/vheaderLen/vrecordLen', substr($h, 4, 8));
+    $fields = []; $off = 1;
+    while (true) {
+        $d = fread($dbf, 32);
+        if ($d === false || ord($d[0]) === 0x0D) { break; }
+        $fields[rtrim(substr($d, 0, 11), "\0")] = ['off' => $off, 'len' => ord($d[16])];
+        $off += ord($d[16]);
+    }
+    $isFerry = [];
+    fseek($dbf, $hd['headerLen']);
+    for ($i = 1; $i <= $hd['records']; $i++) {
+        $row = fread($dbf, $hd['recordLen']);
+        if ($row === false || strlen($row) < $hd['recordLen']) { break; }
+        $v = trim(substr($row, $fields['fclass']['off'], $fields['fclass']['len']));
+        if ($v === 'ferry_terminal') { $isFerry[$i] = true; }
+    }
+    fclose($dbf);
+    if (!$isFerry) { return 0; }
+
+    $shp = fopen("$src.shp", 'rb');
+    $head = fread($shp, 100);
+    $fileLen = unpack('N', substr($head, 24, 4))[1] * 2;
+    $pts = [];
+    $rec = 0;
+    while (ftell($shp) < $fileLen) {
+        $rh = fread($shp, 8);
+        if ($rh === false || strlen($rh) < 8) { break; }
+        $r = unpack('Nnum/Nlen', $rh);
+        $c = fread($shp, $r['len'] * 2);
+        if ($c === false || strlen($c) < 4) { break; }
+        $rec++;
+        if (unpack('Vt', substr($c, 0, 4))['t'] !== 1) { continue; }   // point
+        if (!isset($isFerry[$rec])) { continue; }
+        $xy = unpack('dx/dy', substr($c, 4, 16));
+        $pts[] = [$xy['y'], $xy['x']];
+    }
+    fclose($shp);
+    if (count($pts) < 2) { return 0; }
+
+    // ---- nearest kept node to each terminal, through a coarse grid
+    $grid = [];
+    for ($i = 0; $i < $next; $i++) {
+        if ($compSize[$comp[$i]] < MIN_COMPONENT) { continue; }
+        $gx = (int) floor($lon[$i] / 1e5);
+        $gy = (int) floor($lat[$i] / 1e5);
+        $grid[$gx * 100000 + $gy][] = $i;
+    }
+    $anchor = [];      // [node, component, lat, lon] per terminal that snapped
+    foreach ($pts as [$tla, $tlo]) {
+        $gx = (int) floor($tlo * 1e7 / 1e5);
+        $gy = (int) floor($tla * 1e7 / 1e5);
+        $best = -1; $bestD = INF;
+        for ($dx = -2; $dx <= 2; $dx++) {
+            for ($dy = -2; $dy <= 2; $dy++) {
+                $cell = $grid[($gx + $dx) * 100000 + ($gy + $dy)] ?? null;
+                if ($cell === null) { continue; }
+                foreach ($cell as $n) {
+                    $d = ground($lat[$n] / 1e7, $lon[$n] / 1e7, $tla, $tlo);
+                    if ($d < $bestD) { $bestD = $d; $best = $n; }
+                }
+            }
+        }
+        if ($best >= 0 && $bestD <= FERRY_SNAP_M) {
+            $anchor[] = [$best, $comp[$best], $tla, $tlo];
+        }
+    }
+    if (count($anchor) < 2) { return 0; }
+
+    /*
+     * Shortest crossing first, merging as it goes.
+     *
+     * The first version added the shortest crossing between every pair of
+     * pieces, which for the Wadden meant joining each island to every other
+     * as well as to the coast: fifteen crossings where there are five, and
+     * among them a ninety-four kilometre sailing from Texel to
+     * Schiermonnikoog that has never existed.
+     *
+     * Taking them in order of length and skipping any whose two ends are
+     * already joined fixes it by construction. The shortest crossing from
+     * Texel reaches Den Helder, and from that moment Texel is part of the
+     * mainland - so when Vlieland's turn comes, its shortest crossing to
+     * anywhere it is not already connected to is Harlingen, which is the
+     * ferry that exists. What comes out is the cheapest set of crossings that
+     * joins everything joinable, and real ferry networks are shaped that way
+     * because they were built for the same reason.
+     */
+    $cand = [];
+    $n = count($anchor);
+    for ($i = 0; $i < $n; $i++) {
+        for ($j = $i + 1; $j < $n; $j++) {
+            if ($anchor[$i][1] === $anchor[$j][1]) { continue; }
+            $d = ground($anchor[$i][2], $anchor[$i][3], $anchor[$j][2], $anchor[$j][3]);
+            if ($d > MAX_FERRY_M) { continue; }
+            $cand[] = [$d, $anchor[$i][0], $anchor[$j][0], $anchor[$i][1], $anchor[$j][1]];
+        }
+    }
+    /*
+     * The coast first, then whatever is left.
+     *
+     * Shortest-first alone builds a chain: Terschelling's nearest other piece
+     * of land is Vlieland, so it joined there, and a drive from Utrecht came
+     * out at five and three quarter hours by way of two islands instead of
+     * four by way of Harlingen. Ferries are not laid out to minimise total
+     * sailing; they run from the mainland to each island, because that is
+     * where everybody is going.
+     *
+     * So crossings that touch the largest piece are offered first, and only
+     * what cannot reach it that way is joined island to island.
+     */
+    $mainland = array_keys($compSize, max($compSize))[0];
+    usort($cand, function ($x, $y) use ($mainland) {
+        $xm = ($x[3] === $mainland || $x[4] === $mainland) ? 0 : 1;
+        $ym = ($y[3] === $mainland || $y[4] === $mainland) ? 0 : 1;
+        if ($xm !== $ym) { return $xm <=> $ym; }
+        return $x[0] <=> $y[0];
+    });
+
+    $set = [];
+    $find = function ($x) use (&$set, &$find) {
+        while (($set[$x] ?? $x) !== $x) {
+            $set[$x] = $set[$set[$x]] ?? $set[$x];
+            $x = $set[$x];
+        }
+        return $x;
+    };
+
+    $link = [];
+    foreach ($cand as [$d, $u, $v, $ca, $cb]) {
+        $ra = $find($ca); $rb = $find($cb);
+        if ($ra === $rb) { continue; }
+        $set[$ra] = $rb;
+        $link[] = [$u, $v, $d];
+    }
+
+    $added = 0;
+    foreach ($link as [$u, $v, $d]) {
+        $cost = (int) round((FERRY_WAIT_SEC + $d / FERRY_MPS) * 10);
+        if ($cost > 65535) {
+            // Cannot happen while MAX_FERRY_M holds, and must not pass
+            // silently if it stops holding: an under-costed crossing is
+            // chosen over roads that are genuinely quicker.
+            fwrite(STDERR, sprintf("  ferry too long to cost (%.1f km); skipped\n",
+                $d / 1000));
+            continue;
+        }
+        $arcsFrom[$u][] = [$v, $cost];
+        $arcsFrom[$v][] = [$u, $cost];
+        $backFrom[$v][] = $u;
+        $backFrom[$u][] = $v;
+        $arcCount += 2;
+        $added++;
+        fwrite(STDERR, sprintf("  ferry: %.4f,%.4f to %.4f,%.4f  %.1f km, %d min\n",
+            $lat[$u] / 1e7, $lon[$u] / 1e7, $lat[$v] / 1e7, $lon[$v] / 1e7,
+            $d / 1000, round($cost / 600)));
+    }
+    return $added;
+}
+
+$ferries = add_ferries($country, $arcsFrom, $backFrom, $lat, $lon, $next,
+                       $comp, $compSize, $arcCount);
+fwrite(STDERR, sprintf("%d ferry crossings added\n", $ferries));
 
 $keep = [];
 $renum = array_fill(0, $next, -1);
 $kept = 0;
 for ($i = 0; $i < $next; $i++) {
-    if ($comp[$i] === $bestComp) { $renum[$i] = $kept++; $keep[] = $i; }
+    if ($compSize[$comp[$i]] >= MIN_COMPONENT) { $renum[$i] = $kept++; $keep[] = $i; }
 }
 
 $newArcs = [];
@@ -334,7 +607,7 @@ $lat = $newLat;
 $lon = $newLon;
 $next = $kept;
 $arcCount -= $dropped;
-unset($comp, $renum, $keep, $newArcs, $newLat, $newLon, $backFrom);
+unset($comp, $compSize, $renum, $keep, $newArcs, $newLat, $newLon, $backFrom);
 fwrite(STDERR, sprintf("dropped %d arcs into fragments; %d nodes, %d arcs remain\n",
     $dropped, $next, $arcCount));
 
@@ -379,9 +652,40 @@ $cellOf = array_fill(0, $cols * $rows + 1, 0);
 foreach ($order as $pos => $old) { $cellOf[$cellIdx2[$old] + 1]++; }
 for ($c = 1; $c <= $cols * $rows; $c++) { $cellOf[$c] += $cellOf[$c - 1]; }
 
-$out = fopen(DATA_DIR . "/$country.graph", 'wb');
+/*
+ * Written beside the live file and moved into place at the end.
+ *
+ * This used to open the graph the server is serving and truncate it. A build
+ * that runs out of memory - and England's is a hundred and sixty megabytes,
+ * held in PHP arrays before any of it is written - then leaves that country
+ * unroutable, with a file that is the right name and the wrong length, until
+ * somebody notices and builds it again. rename() on the same filesystem is
+ * atomic, so a reader sees either the old graph or the new one.
+ */
+$finalPath = DATA_DIR . "/$country.graph";
+$tmpPath = $finalPath . '.new';
+$out = fopen($tmpPath, 'wb');
+if ($out === false) { fwrite(STDERR, "cannot write $tmpPath\n"); exit(1); }
+/*
+ * The header's spare 16 bits carry the fastest speed in the graph, in km/h.
+ *
+ * A* is only guaranteed to find the best route if its estimate of what is
+ * left never exceeds the truth, and that estimate is the straight-line
+ * distance divided by the fastest anything can be driven. The router had 110
+ * km/h written into it as a guess. This extract has 1,589 ways tagged 120 or
+ * 130, so the guess was wrong and the search was not, strictly, finding the
+ * best route - it happened to anyway on every pair tested, which is luck
+ * rather than a property.
+ *
+ * Writing the real figure makes it a property, and makes it tight: a graph
+ * whose fastest road is a 50 km/h town gets a much better estimate than any
+ * constant a router could safely assume. The field was already there and
+ * already zero, so a reader that ignores it is unaffected, and a reader that
+ * sees zero knows it is looking at a graph built before this and can fall
+ * back to something conservative.
+ */
 fwrite($out, 'WGR2');
-fwrite($out, pack('CCn', 2, 0, 0));
+fwrite($out, pack('CCn', 2, 0, $maxKmh > 65535 ? 65535 : $maxKmh));
 fwrite($out, pack('NNNN', $next, $arcCount, $cols, $rows));
 fwrite($out, pack('E4', $minx, $miny, $maxx, $maxy));
 
@@ -414,19 +718,34 @@ $g = '';
 for ($c = 0; $c <= $cols * $rows; $c++) { $g .= pack('N', $cellOf[$c]); }
 fwrite($out, $g);
 fclose($out);
+// Same permissions the web server needs, before it becomes visible.
+@chmod($tmpPath, 0644);
+if (!rename($tmpPath, $finalPath)) {
+    fwrite(STDERR, "could not move $tmpPath into place\n");
+    @unlink($tmpPath);
+    exit(1);
+}
 
 // Compressed here, once, rather than by the web server on demand. The data
 // directory is not writable by it - and 36MB of deflate inside a request is
 // a CGI timeout waiting to happen.
+// Same care as the graph itself: this is what the watch downloads, and a
+// half-written one is worse than an old one.
 $gz = DATA_DIR . "/$country.graph.gz";
-$fp = gzopen($gz, 'wb6');
-$in = fopen(DATA_DIR . "/$country.graph", 'rb');
+$gzTmp = $gz . '.new';
+$fp = gzopen($gzTmp, 'wb6');
+$in = fopen($finalPath, 'rb');
 while (!feof($in)) { gzwrite($fp, fread($in, 1 << 20)); }
 fclose($in);
 gzclose($fp);
-@chmod($gz, 0644);
+@chmod($gzTmp, 0644);
+if (!rename($gzTmp, $gz)) {
+    fwrite(STDERR, "could not move $gzTmp into place\n");
+    @unlink($gzTmp);
+    exit(1);
+}
 
-$size = filesize(DATA_DIR . "/$country.graph");
+$size = filesize($finalPath);
 fwrite(STDERR, sprintf("wrote %s.graph: %d nodes, %d arcs, %.1f MB (%.1f MB gzipped), %.0fs\n",
     $country, $next, $at, $size / 1048576, filesize($gz) / 1048576,
     microtime(true) - $t0));

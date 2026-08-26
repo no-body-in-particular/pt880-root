@@ -85,11 +85,14 @@ if ($s < 0 || $t < 0) { exit("could not snap\n"); }
 // target comes off the queue, it is still the shortest route.
 $tla = node_lat($raw,$nodesAt,$t); $tlo = node_lon($raw,$nodesAt,$t);
 $kx = cos(deg2rad($tla));
-$MAXMPS = 100 / 3.6;
+// From the graph rather than guessed: see the header note in build_graph.php.
+// A graph built before that field existed says zero, and then a conservative
+// bound is the only safe choice.
+$hdrKmh = unpack('n', substr($raw, 6, 2))[1];
+$MAXMPS = ($hdrKmh > 0 ? $hdrKmh : 140) / 3.6;
 $hOf = function (int $n) use ($raw, $nodesAt, $tla, $tlo, $kx, $MAXMPS): int {
-    $dy = (node_lat($raw,$nodesAt,$n) - $tla) * 110540;
-    $dx = (node_lon($raw,$nodesAt,$n) - $tlo) * 111320 * $kx;
-    return (int) (sqrt($dx*$dx + $dy*$dy) / $MAXMPS * 10);
+    return (int) (ground(node_lat($raw,$nodesAt,$n), node_lon($raw,$nodesAt,$n),
+                         $tla, $tlo) / $MAXMPS * 10);
 };
 $t0 = microtime(true);
 $dist = [];
@@ -131,10 +134,8 @@ $path = array_reverse($path);
 $metres = 0;
 for ($i = 1; $i < count($path); $i++) {
     $a = $path[$i-1]; $b = $path[$i];
-    $dla = node_lat($raw,$nodesAt,$b) - node_lat($raw,$nodesAt,$a);
-    $dlo = (node_lon($raw,$nodesAt,$b) - node_lon($raw,$nodesAt,$a))
-           * cos(deg2rad(node_lat($raw,$nodesAt,$a)));
-    $metres += sqrt(($dla*110540)**2 + ($dlo*111320)**2);
+    $metres += ground(node_lat($raw,$nodesAt,$a), node_lon($raw,$nodesAt,$a),
+                      node_lat($raw,$nodesAt,$b), node_lon($raw,$nodesAt,$b));
 }
 
 // The graph has a node only where ways meet, so $metres above is a chain of
@@ -154,10 +155,8 @@ if (getenv('TRUELEN')) {
         if (isset($tab[$pair])) { $sum += $tab[$pair]; continue; }
         // No entry: fall back to the chord rather than dropping the hop.
         $missed++;
-        $dla = node_lat($raw,$nodesAt,$b) - node_lat($raw,$nodesAt,$a);
-        $dlo = (node_lon($raw,$nodesAt,$b) - node_lon($raw,$nodesAt,$a))
-               * cos(deg2rad(node_lat($raw,$nodesAt,$a)));
-        $sum += sqrt(($dla*110540)**2 + ($dlo*111320)**2);
+        $sum += ground(node_lat($raw,$nodesAt,$a), node_lon($raw,$nodesAt,$a),
+                       node_lat($raw,$nodesAt,$b), node_lon($raw,$nodesAt,$b));
     }
     $trueKm = $sum / 1000;
     if ($missed) { fwrite(STDERR, "truelen: $missed of " . (count($path)-1) . " hops fell back to the chord\n"); }

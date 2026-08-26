@@ -739,3 +739,38 @@ function drive_speeds(): array {
         'service' => 12, 'track' => 10, 'unknown' => 25,
     ];
 }
+
+/*
+ * Distances on the ground.
+ *
+ * Everything here used to measure a degree of latitude as 110540 metres. That
+ * is the value at the equator: it is 111267 in the Netherlands and 111412 in
+ * Scotland, so every distance the server computed was 0.65% short, and short
+ * by more the further north the country. The error is one-sided - it never
+ * cancels - and it fed straight into arc costs, route lengths and arrival
+ * times, all of which came out optimistic.
+ *
+ * These are the usual WGS84 series, good to about a metre in a degree, which
+ * is well past what a road measured between junctions can make use of.
+ */
+
+/** Metres in a degree of latitude, at this latitude. */
+function metres_per_lat(float $lat): float {
+    $p = deg2rad($lat);
+    return 111132.954 - 559.822 * cos(2 * $p) + 1.175 * cos(4 * $p);
+}
+
+/** Metres in a degree of longitude, at this latitude. */
+function metres_per_lon(float $lat): float {
+    $p = deg2rad($lat);
+    return 111412.84 * cos($p) - 93.5 * cos(3 * $p) + 0.118 * cos(5 * $p);
+}
+
+/** Between two points. Flat-earth at the midpoint, which over anything
+ *  shorter than a country is indistinguishable from the great circle. */
+function ground(float $la1, float $lo1, float $la2, float $lo2): float {
+    $mid = ($la1 + $la2) / 2;
+    $dy = ($la2 - $la1) * metres_per_lat($mid);
+    $dx = ($lo2 - $lo1) * metres_per_lon($mid);
+    return sqrt($dx * $dx + $dy * $dy);
+}
