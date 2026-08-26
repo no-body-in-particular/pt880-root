@@ -61,6 +61,25 @@ Reads `MAP_ROOT` (default `/var/www/hiawatha/map`) and `MAP_ADDR` (default
 `127.0.0.1:8088`). Runs as `hiawatha` so the tile cache it writes is the one
 the web server can read.
 
+## Alerts
+
+`/alerts.php?c=<country>` returns the speed cameras, motorway junctions and
+filling stations for a country, and with `&w=&s=&e=&n=` for a box of it.
+
+Built from the store per request rather than served from a file. It started as
+a precomputed artifact and that was the wrong shape twice over: the file goes
+stale against the store it came from, and a country is all a caller can ask
+for - a continent's cameras are not a sensible download for a watch that only
+needs the ones around it. The store is already indexed by cell, so a box costs
+a box: the Netherlands is 114 kB whole, 3 kB around one town.
+
+There is no PHP equivalent. Everything else here has one because it was ported
+from one; this never existed in PHP, and a second implementation of the format
+is a second thing to keep in step.
+
+A store built before `import_points.php` has no points table and gets an empty
+layer rather than an error, which the watch reads as "nothing here".
+
 `MAP_OSRM` (default `https://router.project-osrm.org`) is where `/route.php`
 goes. The watch routes on the graph on its own card whenever it has one, so
 this endpoint only answers for a country that has not been downloaded - but

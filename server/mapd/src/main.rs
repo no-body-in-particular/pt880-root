@@ -12,6 +12,7 @@
 //! that decoded map data stays decoded between requests.
 
 mod graph;
+mod alerts;
 mod route_encode;
 mod mercator;
 mod palette;

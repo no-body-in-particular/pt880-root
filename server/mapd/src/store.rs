@@ -428,3 +428,60 @@ impl Stores {
         best
     }
 }
+
+/// One of the things beside the road: a camera, a motorway exit, a filling
+/// station.
+pub struct Point {
+    pub kind: u8,
+    pub lat: f64,
+    pub lon: f64,
+    pub name: Option<String>,
+}
+
+impl Country {
+    /// Points inside a box, or all of them if the box covers the country.
+    ///
+    /// Read through the cell index the same way ways and areas are, so asking
+    /// for a town's worth costs a town's worth rather than a country's. That
+    /// is the whole reason this is a query rather than a file: the Netherlands
+    /// packs into 111 kB and a continent would not, and a watch only ever
+    /// needs what is around it.
+    pub fn points(&self, b: Bbox) -> Vec<Point> {
+        let cx0 = (b.0 / CELL_DEG).floor() as i64;
+        let cx1 = (b.2 / CELL_DEG).floor() as i64;
+        let cy0 = (b.1 / CELL_DEG).floor() as i64;
+        let cy1 = (b.3 / CELL_DEG).floor() as i64;
+
+        let db = match self.db.lock() {
+            Ok(d) => d,
+            Err(_) => return Vec::new(),
+        };
+        let mut st = match db.prepare(
+            "SELECT kind, lat, lon, name FROM pt
+              WHERE cx BETWEEN ?1 AND ?2 AND cy BETWEEN ?3 AND ?4",
+        ) {
+            Ok(s) => s,
+            // No pt table: a store built before points were imported. Not an
+            // error - the watch does without.
+            Err(_) => return Vec::new(),
+        };
+        let rows = st.query_map([cx0, cx1, cy0, cy1], |r| {
+            Ok(Point {
+                kind: r.get::<_, i64>(0)? as u8,
+                lat: r.get(1)?,
+                lon: r.get(2)?,
+                name: r.get::<_, Option<String>>(3)?,
+            })
+        });
+        let mut out = Vec::new();
+        if let Ok(rows) = rows {
+            for p in rows.flatten() {
+                // The cell index is coarse; the box is what was asked for.
+                if p.lat >= b.1 && p.lat <= b.3 && p.lon >= b.0 && p.lon <= b.2 {
+                    out.push(p);
+                }
+            }
+        }
+        out
+    }
+}

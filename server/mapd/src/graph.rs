@@ -6,6 +6,7 @@
 //! renumbering rather than a search.
 
 use crate::mercator::CELL_DEG;
+use crate::store::Bbox;
 use crate::App;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -245,25 +246,55 @@ pub fn handle(app: &App, r: Request, q: &HashMap<String, String>, gz: bool) {
     }
 }
 
-/// The speed cameras, motorway exits and filling stations for a country.
+/// The speed cameras, motorway exits and filling stations for an area.
 ///
-/// A plain file, served like the graph and validated the same way: the name
-/// comes from a query string, so it is checked against a character set rather
-/// than trusted to be a filename. A country without one is a 404 and the
-/// watch does without.
+///     /alerts.php?c=netherlands                    the whole country
+///     /alerts.php?c=netherlands&w=..&s=..&e=..&n=..  a box of it
+///
+/// Built from the store on the way out rather than read from a file. The
+/// store is indexed by cell, so a box costs a box - which is the point: the
+/// Netherlands packs into 111 kB and a continent would not, and a watch only
+/// ever needs what is around it.
+///
+/// A country whose store predates the point import has no `pt` table and
+/// answers with an empty layer rather than an error. "Nothing here" is a
+/// thing the watch knows how to handle; a 500 is not.
 pub fn alerts(app: &App, r: Request, q: &HashMap<String, String>) {
     let name = match q.get("c") {
-        Some(n) if !n.is_empty() => n.clone(),
+        Some(n) if !n.is_empty() => n.as_str(),
         _ => return send_status(r, 400, "no country"),
     };
-    if !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
-        return send_status(r, 400, "bad country");
+    let country = match app.stores.get(name) {
+        Some(c) => c,
+        None => return send_status(r, 404, "no such country"),
+    };
+
+    let full = country.bbox;
+    let box_ = if q.contains_key("w") || q.contains_key("n") {
+        let w = num::<f64>(q, "w", f64::NAN);
+        let s = num::<f64>(q, "s", f64::NAN);
+        let e = num::<f64>(q, "e", f64::NAN);
+        let n = num::<f64>(q, "n", f64::NAN);
+        if !crate::sane_lon(w) || !crate::sane_lon(e)
+            || !crate::sane_lat(s) || !crate::sane_lat(n)
+            || e <= w || n <= s
+        {
+            return send_status(r, 400, "bad box");
+        }
+        // Clipped to the country: a box reaching past it would otherwise make
+        // a grid of empty cells stretching to wherever the caller asked.
+        Bbox(w.max(full.0), s.max(full.1), e.min(full.2), n.min(full.3))
+    } else {
+        full
+    };
+    if box_.2 <= box_.0 || box_.3 <= box_.1 {
+        // Asked for somewhere this country is not.
+        return send_bytes(r, crate::alerts::encode(&[], full), "application/octet-stream", false);
     }
-    let p = app.data.join(format!("{}.alerts", name));
-    match std::fs::read(&p) {
-        Ok(b) => send_bytes(r, b, "application/octet-stream", false),
-        Err(_) => send_status(r, 404, "no alerts"),
-    }
+
+    let pts = country.points(box_);
+    let bin = crate::alerts::encode(&pts, box_);
+    send_bytes(r, bin, "application/octet-stream", false)
 }
 
 /// At most this many route requests may be waiting on the upstream router at

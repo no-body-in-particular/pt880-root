@@ -75,9 +75,9 @@ echo "== routing graph"
 php build_graph.php "$NAME"
 
 # The things beside the road: speed cameras to warn about, motorway junctions
-# to name, filling stations to find. None of them affect routing, so a country
-# without a traffic layer just does not get one and the watch says nothing.
-php build_alerts.php "$NAME" || echo "  (no alert layer for $NAME)"
+# to name, filling stations to find. Into the store like everything else, so
+# mapd can answer for any box of them rather than a country at a time.
+php import_points.php "$NAME"
 
 # The web server has to be able to write the tile cache for this country.
 if id hiawatha >/dev/null 2>&1; then
