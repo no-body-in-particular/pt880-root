@@ -184,29 +184,21 @@ pub fn handle(app: &App, r: Request, q: &HashMap<String, String>, gz: bool) {
             num::<f64>(q, "e", 0.0),
             num::<f64>(q, "n", 0.0),
         );
-        let key = format!("{}_{:.3}_{:.3}_{:.3}_{:.3}", name, w, s, e, n);
-        let cached = app.tiles.join("graphs").join(format!("{}.graph", key));
-
-        let body = match std::fs::read(&cached) {
-            Ok(b) if !b.is_empty() => b,
-            _ => {
-                let raw = match std::fs::read(&path) {
-                    Ok(b) => b,
-                    Err(_) => return send_status(r, 404, "no graph"),
-                };
-                let cut = match subgraph(&raw, w, s, e, n) {
-                    Some(c) => c,
-                    None => return send_status(r, 404, "empty box"),
-                };
-                if let Some(d) = cached.parent() {
-                    let _ = std::fs::create_dir_all(d);
-                }
-                let tmp = cached.with_extension(format!("graph.{}", std::process::id()));
-                if std::fs::write(&tmp, &cut).is_ok() {
-                    let _ = std::fs::rename(&tmp, &cached);
-                }
-                cut
-            }
+        // Cut fresh every time, and not written to disk.
+        //
+        // It used to be cached per bounding box, which means one file per
+        // distinct box - and the box comes from the request. Five crafted
+        // requests made five files; there is no number at which that stops.
+        // Cutting a box out of the Netherlands takes a moment and the watch
+        // asks for one perhaps once a country, so the cache was buying very
+        // little and offering anyone on the internet a way to fill the disk.
+        let raw = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(_) => return send_status(r, 404, "no graph"),
+        };
+        let body = match subgraph(&raw, w, s, e, n) {
+            Some(c) => c,
+            None => return send_status(r, 404, "empty box"),
         };
 
         if q.contains_key("info") {

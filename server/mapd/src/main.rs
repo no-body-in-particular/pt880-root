@@ -43,6 +43,9 @@ pub struct App {
 /// happens: the watch stores what it downloads, so it does not ask twice.
 const RECENT_BLOCKS: usize = 20;
 
+/// The most tiles one request may ask to have rendered.
+const MAX_TILES: i32 = 400;
+
 fn query(url: &str) -> HashMap<String, String> {
     let mut out = HashMap::new();
     if let Some(q) = url.split('?').nth(1) {
@@ -282,6 +285,15 @@ fn handle(app: &App, r: Request) {
             let h: i32 = num::<i32>(&q, "h", 16).clamp(1, 32);
             if z < 1 || z > 18 || x < 0 || y < 0 {
                 return send_status(r, 400, "bad request");
+            }
+            // Enough to amortise the round trip, small enough that one
+            // request cannot occupy the machine. The PHP had this limit and
+            // the port lost it: clamping w and h to 32 each allows 1024
+            // tiles, which measured 7.4 seconds of cpu and four megabytes -
+            // per unauthenticated request, from the internet. A handful at
+            // once would take every core.
+            if w * h > MAX_TILES {
+                return send_status(r, 400, "too many tiles");
             }
             let mid = mercator::tile_bbox(z, x + w / 2, y + h / 2);
             let c = match pick(app, &q, (mid.0 + mid.2) / 2.0, (mid.1 + mid.3) / 2.0) {
