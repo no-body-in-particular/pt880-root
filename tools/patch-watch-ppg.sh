@@ -4,6 +4,7 @@
 #
 #     ./patch-watch-ppg.sh              patch it
 #     ./patch-watch-ppg.sh --dry-run    say what would happen, change nothing
+#     ./patch-watch-ppg.sh --status     say what is on the watch, change nothing
 #     ./patch-watch-ppg.sh --restore    put the stock file back
 #
 # HeartRateManager.triggerPPGTest gives up before it reaches the sensor if either
@@ -42,19 +43,26 @@ BASE="${BASE:-https://coredump.ws/pt880}"
 # copy - a checkout next to this script is whatever the user has checked out.
 PATCHER_SHA256="14260d5893177238237623afed2526ce369b68be4b1dfb8b306577b430ceaec4"
 
+# The stock odex, straight out of pt880-firmware-stock.zip, as a last resort for
+# --restore on a watch that has no backup of its own. Pinned for the same reason
+# the patcher is: this one gets written to /system.
+STOCK_SHA256="ae6db546e5abd4393e914a3f3f6eef69837efbb00db2e722343c945b0493fd4e"
+
 ODEX=/system/priv-app/L009_Protocol.odex
 BACKUP=/system/priv-app/L009_Protocol.odex.orig
 STAGE=/data/local/tmp/L009_Protocol.odex
 
 DO_DRY=0
 DO_RESTORE=0
+DO_STATUS=0
 
 for a in "$@"; do
     case "$a" in
         --dry-run) DO_DRY=1 ;;
         --restore) DO_RESTORE=1 ;;
+        --status) DO_STATUS=1 ;;
         -h|--help) sed -n '3,9p' "$0" 2>/dev/null \
-                       || echo "flags: --dry-run --restore"; exit 0 ;;
+                       || echo "flags: --dry-run --status --restore"; exit 0 ;;
         *) printf 'unknown option: %s\n' "$a" >&2; exit 2 ;;
     esac
 done
@@ -72,6 +80,37 @@ sha256() {
     if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1
     else sha256sum "$1" | cut -d' ' -f1
     fi
+}
+
+# ---------------------------------------------------------------- the patcher
+
+PATCHER="$HERE/patch_ppg_gate.py"
+
+# Called by whichever mode needs it rather than at the top, so --restore from an
+# on-device backup still works when the network does not.
+need_patcher() {
+    [ -f "$PATCHER" ] && return 0
+
+    say "fetching the patcher"
+    PATCHER="$WORK/patch_ppg_gate.py"
+
+    # Fetched as .py.txt, not .py. The web server this is published on treats a
+    # .py as a CGI script and tries to run it, which answers the download with a
+    # 500 rather than the file. The suffix is the whole fix; the content is the
+    # same file byte for byte, and the checksum below proves it.
+    curl -fsSL "$BASE/patch_ppg_gate.py.txt" -o "$PATCHER" \
+        || die "could not fetch patch_ppg_gate.py.txt from $BASE"
+
+    GOT="$(sha256 "$PATCHER")"
+
+    if [ "$GOT" != "$PATCHER_SHA256" ]; then
+        die "patch_ppg_gate.py does not match its pinned checksum.
+       expected $PATCHER_SHA256
+       got      $GOT"
+    fi
+
+    command -v python3 >/dev/null 2>&1 \
+        || die "python3 not found - on macOS, 'xcode-select --install' provides it"
 }
 
 # ---------------------------------------------------------------- the device
@@ -102,10 +141,87 @@ adbq shell "[ -f $ODEX ] && echo yes" | grep -q yes || die "$ODEX is not on this
 
 # ---------------------------------------------------------------- restore
 
+# Reads the installed file and says which of the two it is. Changes nothing, and
+# is the thing to run when you are not sure whether an earlier attempt landed.
+if [ "$DO_STATUS" = 1 ]; then
+    say "status"
+    need_patcher
+    adbq pull "$ODEX" "$WORK/on-watch.odex" >/dev/null || die "could not pull $ODEX"
+    printf '  %s  %s bytes\n' "$(sha256 "$WORK/on-watch.odex" | cut -c1-16)" \
+        "$(wc -c < "$WORK/on-watch.odex" | tr -d ' ')"
+
+    if python3 "$PATCHER" "$WORK/on-watch.odex" --verify | grep -q 'already patched'; then
+        printf '  PATCHED - the wear and cut checks are bypassed\n'
+    else
+        printf '  STOCK - the wear and cut checks are active\n'
+    fi
+
+    if adbq shell "[ -f $BACKUP ] && echo yes" | grep -q yes; then
+        printf '  a backup exists on the watch at %s\n' "$BACKUP"
+    else
+        printf '  no backup on the watch (expected, if this has never been patched)\n'
+    fi
+
+    exit 0
+fi
+
 if [ "$DO_RESTORE" = 1 ]; then
     say "restore"
-    adbq shell "[ -f $BACKUP ] && echo yes" | grep -q yes \
-        || die "no $BACKUP on the watch - nothing to restore from"
+
+    # Three places the stock file can come from, best first. Without the last
+    # two, a watch that was patched by some other means - or whose backup went
+    # missing - has nothing to go back to, which is the situation this hit.
+    SRC=""
+
+    if adbq shell "[ -f $BACKUP ] && echo yes" | grep -q yes; then
+        printf '  using the backup on the watch\n'
+        SRC=device
+
+    else
+        LOCAL="$(ls -t "$HERE"/L009_Protocol.odex.stock-* 2>/dev/null | head -1 || true)"
+
+        if [ -n "$LOCAL" ]; then
+            printf '  no backup on the watch; using %s\n' "$LOCAL"
+            cp "$LOCAL" "$WORK/stock.odex"
+            SRC=local
+
+        else
+            printf '  no backup on the watch and none kept here; fetching the stock file\n'
+            curl -fsSL "$BASE/L009_Protocol.odex.stock" -o "$WORK/stock.odex" \
+                || die "could not fetch the stock odex from $BASE"
+            GOT="$(sha256 "$WORK/stock.odex")"
+
+            if [ "$GOT" != "$STOCK_SHA256" ]; then
+                die "the fetched stock odex does not match its pinned checksum.
+       expected $STOCK_SHA256
+       got      $GOT"
+            fi
+
+            SRC=fetched
+        fi
+    fi
+
+    if [ "$SRC" != device ]; then
+        # Only ever restore a file that is genuinely unpatched, whatever it came
+        # from - restoring an already-patched copy would look like it worked and
+        # change nothing.
+        need_patcher
+        python3 "$PATCHER" "$WORK/stock.odex" --verify | grep -q 'already patched' \
+            && die "the file being restored is itself patched - that is not a stock odex"
+
+        adbq push "$WORK/stock.odex" "$STAGE" >/dev/null || die "could not stage the stock file"
+        adbq shell "
+          mount -o remount,rw /system &&
+          cat $STAGE > $ODEX &&
+          chown 0:0 $ODEX &&
+          chmod 644 $ODEX
+          mount -o remount,ro /system
+        "
+        adbq shell "rm -f $STAGE"
+        say "done - rebooting"
+        adbq reboot
+        exit 0
+    fi
 
     # One shell, so a failure part way still hits the final remount and does not
     # leave /system writable.
@@ -121,29 +237,10 @@ if [ "$DO_RESTORE" = 1 ]; then
     exit 0
 fi
 
-# ---------------------------------------------------------------- the patcher
-
-PATCHER="$HERE/patch_ppg_gate.py"
-
-if [ ! -f "$PATCHER" ]; then
-    say "fetching the patcher"
-    PATCHER="$WORK/patch_ppg_gate.py"
-    curl -fsSL "$BASE/patch_ppg_gate.py" -o "$PATCHER" \
-        || die "could not fetch patch_ppg_gate.py from $BASE"
-
-    GOT="$(sha256 "$PATCHER")"
-
-    if [ "$GOT" != "$PATCHER_SHA256" ]; then
-        die "patch_ppg_gate.py does not match its pinned checksum.
-       expected $PATCHER_SHA256
-       got      $GOT"
-    fi
-fi
-
-command -v python3 >/dev/null 2>&1 \
-    || die "python3 not found - on macOS, 'xcode-select --install' provides it"
 
 # ---------------------------------------------------------------- pull, patch
+
+need_patcher
 
 say "reading the stock file"
 adbq pull "$ODEX" "$WORK/stock.odex" >/dev/null || die "could not pull $ODEX"
