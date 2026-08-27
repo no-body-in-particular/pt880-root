@@ -98,8 +98,9 @@ detail.
 appears, does exactly one hardcoded thing: restart `com.ic.work`. No shell
 evaluation. Anything that can create the flag can restart the sensor service and
 nothing else — a nuisance rather than an escalation. Detection stays in the
-launcher, which already listens for the vendor's own result broadcasts and has
-been shown to detect stalls correctly all day.
+launcher, which is the weakness: see above, it has never received one of the
+broadcasts it counts on, so it would be asking for a restart every fifteen
+minutes whether or not anything was wrong.
 
 **Self-contained daemon.** No app involvement at all. The firmware's `ICLogger`
 writes to logcat under tag `log`, and `HeartRateManager$2` logs 心率测试结果来了
