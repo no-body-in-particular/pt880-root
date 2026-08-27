@@ -250,6 +250,15 @@ printf '  %s  %s bytes\n' "$(sha256 "$WORK/stock.odex" | cut -c1-16)" \
 say "patching"
 python3 "$PATCHER" "$WORK/stock.odex" -o "$WORK/patched.odex" | sed 's/^ *//' | sed 's/^/  /'
 
+# Nothing to do is a success, not a failure. The patcher writes no output file
+# when the input is already patched, and without this the cmp below dies on a
+# missing file and reports "expected 25 changed bytes, got 0" - which reads like
+# the patch failed when in fact it was already installed.
+if [ ! -f "$WORK/patched.odex" ]; then
+    say "the watch is already patched - nothing to do"
+    exit 0
+fi
+
 # The patcher changes one opcode byte plus the dex checksum and signature it has
 # to reseal - four bytes and twenty. Anything else means it did not do what this
 # script thinks it did, and the file is not going anywhere near /system.
