@@ -275,3 +275,63 @@ adb shell /system/xbin/tcpdump -i seth_lte0 -s 0 -A -n -l -c 20 host <server-ip>
 - The inventory counts opcodes referenced *from code*. A command handled by a
   branch that never runs would still be counted. Nothing here proves every
   opcode is reachable at runtime.
+
+## 10. The on-device sensor service (`com.ic.work`)
+
+Not part of the tracker protocol — this is the binder interface the vendor's own
+apps use to reach the sensors, and it is on the same device. Recorded here
+because working it out took a day and the code that used it has been removed.
+
+`com.ic.work.SensorDataService` is declared `exported="true"` with **no
+permission**, so any app on the watch can bind it.
+
+```
+interface com.ic.work.IHeartRateSensorService
+  1  registerCallback(IHeartRateSensorCallback, String pkg)   writes a reply
+  2  unRegisterCallback(IHeartRateSensorCallback)             writes a reply
+  3  getHeartRateInfo(int from, String pkg)                   writes NO reply
+
+interface com.ic.work.IHeartRateSensorCallback
+  1  onHeartRateGet(HeartRate)     3  onGettingData()
+  2  onHeartRateUpdate(HeartRate)  4  onWaiting()
+
+HeartRate parcel: a null-flag int, then five ints in this order
+  oxygen, from, heartRate, bloodHeight, bloodLow
+```
+
+Transaction 3 returns out of `onTransact` without `writeNoException`, so a
+synchronous call leaves the caller reading an empty reply — it must go
+`FLAG_ONEWAY`. Transactions 1 and 2 do write a reply and must not.
+
+`from` is echoed back in the result and is otherwise free, so a caller can tell
+its own readings from the firmware's scheduled ones.
+`HeartRateOxygenTestType`: 0 ALL, 1 JUST\_OXYGEN, 2 JUST\_HEART\_RATE.
+
+### Why nothing uses it
+
+The service keeps **one work queue for both sensors** — heart rate and
+temperature — with a single worker taking items through `handleTestEvent`. Each
+item carries a creation timestamp, and that timestamp is the only
+`currentTimeMillis()` call in the service: it is written and never compared. So
+there is no timeout, and a measurement whose sensor callback never arrives holds
+the queue permanently. Both sensors stop within a minute of each other and stay
+stopped until the process restarts.
+
+That makes this interface useless as a recovery route. Asking it for a reading
+during a stall only queues another item behind the stuck one. The newer version
+of the interface has a `stopCurrentWork` that would be the escape hatch; the
+build on this watch does not implement it — the binder answers three
+transactions and that is not one of them.
+
+Reaching the same hardware through the platform's `SensorManager`
+(`gh30x_sensor`) is a different route that does not touch this queue.
+
+### Reproducing
+
+```
+baksmali deodex -a 19 -d <framework-odexes> -o out ICL02WorkService.odex
+```
+
+The `-a 19` is not optional. Without it roughly 1800 classes fail with
+truncated-instruction errors — including the ones that matter — and the result
+looks like a much smaller, much simpler app than it is.
