@@ -165,8 +165,55 @@ text to the screen), `setWorkMod`, "take photo immediately", server changing
 format, reminder time-windows, whitelist commands, and blood-pressure
 calibration plus BP / SpO2 / heart-rate detection triggers.
 
-Still unresolved — referenced by the dispatcher but with no descriptive log
-string: `AP89 APS4 APTP APTE APHP AP05 AP07 AP21 AP68 AP87 AP92 APJZ APOX APSQ APU8`.
+### Resolved by their downlink handlers
+
+The dispatcher has no descriptive string for these, but each one's `handleBP*`
+does. Recovered by decoding the `invoke` instructions rather than only the
+`const-string` ones, and inverting that into a caller index: the frame builders
+just format their arguments, so the meaning lives in the handler and in who
+calls it. Chinese log text translated, original where it carries the evidence.
+
+| Opcode | Meaning | Evidence in `handleBP*` |
+|---|---|---|
+| `AP05` / `BP05` | voice messages waiting on the server | "the server has N voice messages not received" |
+| `AP07` / `BP07` | **voice / media packet, and its acknowledgement** | `SentVoicePacket`, `totalPackageCount`, `currentPackage` |
+| `AP68` / `BP68` | device binding / activation state | "bound successfully", "not activated or unbound" |
+| `AP87` / `BP87` | QR-code URL push | "BP87: Qrcode url", writes `persist.sys.qrUriFile` |
+| `AP89` / `BP89` | heart-rate / blood-pressure alarm thresholds | "server command: heart rate / blood pressure threshold" |
+| `APHP` / `BPHP` | heart rate + blood pressure + SpO2 upload | "server received APHP heart rate blood pressure blood oxygen" |
+| `APJZ` / `BPJZ` | blood pressure, systolic and diastolic | `BPH`, `BPL` per index |
+| `APOX` / `BPOX` | blood oxygen | `Handle BPOX IMEI ,index ,cmdname` |
+| `APS4` / `BPS4` | alarm clocks, up to seven | `set 4th alarm` ... `set 7th alarm` |
+| `APTP` / `BPTP` | body temperature | "BPTP server received body temperature data" |
+| `APU8` / `BPU8` | text-message tunnel, also carries the photo trigger | `received Txt Msg111`, `>*photo@1*<`, `CameraUtilRe` |
+| `APX1` / `BPX1` | sensor calibration offsets | `Config.setPPGAdjust`, `setBPHAdjust`, `setBPLAdjust`, `setSPo2Adjust` |
+
+### Dead rather than unknown
+
+`AP21`, `AP92` and `APH1` have a builder and an enum entry and **no caller
+anywhere in the application**. So do the uplink halves of `AP87`, `APHP` and
+`APTP`: the watch handles the downlink but never sends the matching frame.
+Calling them unresolved overstates it. There is nothing to resolve, because
+nothing invokes them.
+
+### Media packets are not text
+
+`AP42` (picture) and `AP07` (voice) share a five-field header and are
+**length-delimited, not `#`-delimited**:
+
+    IWAP42,<yyyymmddhhmmss>,<total packets>,<packet no>,<length>,<length bytes>#
+
+The payload is raw JPEG or AMR and contains `NUL`, `#` and `,` constantly, so
+anything treating it as text truncates the file at the first `#`. Packets are
+1-based and 1024 bytes, the last one short.
+
+The acknowledgement that advances an upload is **`BP07`, not the `BP42` the
+manual documents**. The picture is pushed through the voice-packet sender, and
+the only place its position index is written is `handleBP07`; `handleBP42`
+parses the reply, logs it, and never touches the index. A client waiting on
+`BP42` sends packet one and then stops forever, having been acknowledged at
+the TCP level the whole time. `device_server/device/thinkrace_protocol.c` in
+CTracker has the server side of this.
 
 ## 6. The SMS control plane
 
@@ -271,7 +318,11 @@ adb shell /system/xbin/tcpdump -i seth_lte0 -s 0 -A -n -l -c 20 host <server-ip>
 - **Opcode semantics in §5** — inferred from the dispatcher's own log strings.
   Strong, but they are the vendor's descriptions, not verified by sending the
   commands.
-- **Unresolved opcodes** — listed as unresolved rather than guessed.
+- **The twelve resolved from `handleBP*`** - read out of the handlers' own log
+  strings by instruction-accurate cross-reference, the same method and the same
+  standard as the rest. Strong, but they are the vendor's descriptions.
+- **`AP21` / `AP92` / `APH1` as dead code** - certain. A caller index over every
+  method in the dex finds nothing that invokes them.
 - The inventory counts opcodes referenced *from code*. A command handled by a
   branch that never runs would still be counted. Nothing here proves every
   opcode is reachable at runtime.
