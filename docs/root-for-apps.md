@@ -15,8 +15,26 @@ Restarting `com.ic.work` clears it in seconds. Rebooting the whole watch also
 clears it and is what the server currently does, thirty minutes late, with a
 dark screen and a lost GPS fix each time.
 
-`PpgWatchdog` already detects the stall correctly and already tries the cheap
-fix. It fails, every time, because it has no root.
+`PpgWatchdog` tries the cheap fix and fails every time for want of root.
+
+**Its detection is also broken, and that matters more.** Read this before
+granting it root.
+
+The watchdog decides the watch has gone quiet by listening for the vendor's own
+result broadcasts, `com.ic.action.BLOOD_HEART` and
+`com.enqualcomm.support.ACTION_BROADCAST_PPG`, and stamping a preference on each
+one. It has never received a single one. Measured on 27 August at 22:28 UTC: the
+server had 227 minutes of unbroken readings while the watchdog reported "no
+pulse reading for 106 min", its counter climbing steadily from the moment the
+launcher started. Earlier trips reading "11 min" and "21 min" were 11 and 21
+minutes after a launcher restart, not detections.
+
+So every trip so far has been spurious, roughly one every fifteen minutes,
+harmless only because the recovery is a no-op without root.
+
+**Grant root without fixing this and the daemon will restart `com.ic.work` every
+fifteen minutes on a false signal**, breaking a sensor stack that was working.
+Fix the detection first, or use a design that does not depend on it.
 
 ## Why the launcher cannot get root
 
@@ -95,8 +113,15 @@ at runtime — worth verifying first with:
 adb logcat -v time -s log:* | grep -a 心率
 ```
 
-Recommended: **flag file with a fixed action**, with the logcat detector added
-as a backstop inside the daemon so it still works when the launcher is dead.
+Recommended: **the self-contained daemon**, on the evidence above. The flag-file
+design was recommended here on the strength of the launcher's detection being
+reliable, and it is not - the launcher has never seen one of the broadcasts it
+counts on. A daemon that decides for itself does not inherit that fault.
+
+If the flag-file design is built anyway, the launcher's detection has to be
+fixed and verified first: confirm with `adb logcat` that those broadcasts are
+actually sent, and that a registered receiver in another app receives them.
+Until that is demonstrated, treat any trip from `PpgWatchdog` as noise.
 
 ### If you build it
 
