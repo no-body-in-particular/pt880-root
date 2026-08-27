@@ -2,6 +2,9 @@
 """
 Stop the watch refusing to measure a pulse when it thinks it is off the wrist.
 
+    This did not fix the problem it was written for. Read the note below before
+    reaching for it.
+
     ./patch_ppg_gate.py L009_Protocol.odex [-o patched.odex]
     ./patch_ppg_gate.py L009_Protocol.odex --verify        # report only, write nothing
 
@@ -46,6 +49,30 @@ clearly than it should.
 The code after :cond_2a does not use the CoreService reference the null check
 was guarding - it builds a log line, binds the hardware work service and starts
 a thread - so taking the branch unconditionally cannot dereference null.
+
+What it did not do
+------------------
+
+It did not stop the readings stalling, and the gate was never the cause. Heart
+rate and temperature stop within a minute of each other and come back together,
+and temperature does not go through triggerPPGTest at all - so whatever stops
+them is downstream of both. It is com.ic.work, which runs one work queue for
+both sensors with no timeout on the item at its head.
+
+It may well be a no-op on this hardware. The firmware reports itself as
+l009-EU-noAnti-Common-V3.70, and if that build never sets Anti_off_flag then the
+branch this rewrites was already being taken every time.
+
+It was also blamed, by me, for leaking threads into the stalled queue - on the
+grounds that triggerPPGTest spawns one per call and the patch makes it run more
+often. The first half is true. The second is unverified: the thread's body is
+entirely unresolved quick opcodes, so what it does is not known from here, and
+stock firmware spawns the same thread whenever the gate passes anyway. Treat
+that claim as withdrawn.
+
+The patch is correct in what it does. It is kept because the analysis is worth
+having and the tooling around it - reading, verifying and restoring a system
+odex safely - is reusable. It is not a fix for the stalls.
 """
 
 import argparse

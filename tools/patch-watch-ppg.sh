@@ -2,6 +2,12 @@
 #
 # Stop the watch refusing to measure a pulse when it thinks it is off the wrist.
 #
+# This did not fix the stalls, and the gate it removes was not what caused them:
+# temperature dies alongside the pulse and never goes through this code path at
+# all. On a noAnti firmware the branch may already have been taken every time,
+# making the whole patch a no-op. Kept for the tooling and the analysis, not as
+# a remedy. --restore puts the stock file back.
+#
 #     ./patch-watch-ppg.sh              patch it
 #     ./patch-watch-ppg.sh --dry-run    say what would happen, change nothing
 #     ./patch-watch-ppg.sh --status     say what is on the watch, change nothing
@@ -41,7 +47,7 @@ BASE="${BASE:-https://coredump.ws/pt880}"
 # downloads that file and runs it against a system partition, so a truncated or
 # tampered download is refused rather than executed. Only checked on a fetched
 # copy - a checkout next to this script is whatever the user has checked out.
-PATCHER_SHA256="14260d5893177238237623afed2526ce369b68be4b1dfb8b306577b430ceaec4"
+PATCHER_SHA256="b4aebead183c69ace6de34de80b87e5f5fe7f278a486dc7d1cd5018d7f809a80"
 
 # The stock odex, straight out of pt880-firmware-stock.zip, as a last resort for
 # --restore on a watch that has no backup of its own. Pinned for the same reason
