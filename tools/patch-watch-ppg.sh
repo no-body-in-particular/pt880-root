@@ -36,6 +36,12 @@ adbq() { $ADB "$@" </dev/null; }
 
 BASE="${BASE:-https://coredump.ws/pt880}"
 
+# The sha256 of tools/patch_ppg_gate.py, re-pinned by publish.sh. This script
+# downloads that file and runs it against a system partition, so a truncated or
+# tampered download is refused rather than executed. Only checked on a fetched
+# copy - a checkout next to this script is whatever the user has checked out.
+PATCHER_SHA256="14260d5893177238237623afed2526ce369b68be4b1dfb8b306577b430ceaec4"
+
 ODEX=/system/priv-app/L009_Protocol.odex
 BACKUP=/system/priv-app/L009_Protocol.odex.orig
 STAGE=/data/local/tmp/L009_Protocol.odex
@@ -47,7 +53,8 @@ for a in "$@"; do
     case "$a" in
         --dry-run) DO_DRY=1 ;;
         --restore) DO_RESTORE=1 ;;
-        -h|--help) sed -n '3,9p' "$0"; exit 0 ;;
+        -h|--help) sed -n '3,9p' "$0" 2>/dev/null \
+                       || echo "flags: --dry-run --restore"; exit 0 ;;
         *) printf 'unknown option: %s\n' "$a" >&2; exit 2 ;;
     esac
 done
@@ -123,6 +130,14 @@ if [ ! -f "$PATCHER" ]; then
     PATCHER="$WORK/patch_ppg_gate.py"
     curl -fsSL "$BASE/patch_ppg_gate.py" -o "$PATCHER" \
         || die "could not fetch patch_ppg_gate.py from $BASE"
+
+    GOT="$(sha256 "$PATCHER")"
+
+    if [ "$GOT" != "$PATCHER_SHA256" ]; then
+        die "patch_ppg_gate.py does not match its pinned checksum.
+       expected $PATCHER_SHA256
+       got      $GOT"
+    fi
 fi
 
 command -v python3 >/dev/null 2>&1 \
