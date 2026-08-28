@@ -26,8 +26,8 @@ that identifies this unit.
   **`protocol_beehome`**, selected by `persist.sys.protocol_no=1`.
 - The active protocol has **53 uplink + 53 downlink** opcodes. The public spec
   documents **42 + 42**. **21 uplink and 21 downlink opcodes are undocumented.**
-- A second, entirely separate **SMS control plane** exists: **34** commands in
-  firmware, **11** in the spec, so **23 undocumented** — including remote mic,
+- A second, entirely separate **SMS control plane** exists: **36** commands in
+  firmware, **11** in the spec, so **25 undocumented** — including remote mic,
   remote camera, arbitrary modem AT commands, and server/protocol reconfiguration.
 
 ## 1. Framing
@@ -112,6 +112,16 @@ Uplink (53):
 
 Downlink (53): the same 53 suffixes with a `BP` prefix.
 
+**53 is the enum, not the behaviour.** `CMD_TYPE` has 53 downlink entries but
+only **45** of them have a `handleBP*` method:
+
+    BP00 BP01 BP02 BP03 BP05 BP07 BP12 BP14 BP15 BP16 BP17 BP18 BP28 BP31 BP32
+    BP33 BP34 BP40 BP42 BP46 BP68 BP75 BP84 BP85 BP86 BP87 BP88 BP89 BPHP BPJZ
+    BPMC BPOX BPPH BPS4 BPSM BPSQ BPTE BPTF BPTM BPTP BPTQ BPU8 BPX1 BPXL BPXY
+
+`BP10 BP21 BP49 BP92 BPH1 BPHT BPJK BPVR` are recognised by the parser and then
+dropped on the floor. Ask "what will the watch act on" and the answer is 45.
+
 ## 4. Gap against the public specification
 
 Reference: [Thinkrace IW protocol V2.10, 2025-04-20](https://www.thinkrace.com/wp-content/uploads/2025/05/IW-protocol_Thinkrace_V2.10-20250420.pdf),
@@ -159,11 +169,13 @@ the opcode.
 | **`APX1` / `BPX1`** | set HR / BP / SpO2 correction values | "server set heart rate, blood pressure, blood oxygen correction value BPX1" |
 | `AP86` | find-device | `findDev` |
 
-Same dispatcher, features without a resolved opcode: `showTxt` (server pushes
-text to the screen), `setWorkMod`, "take photo immediately", server changing
-`skipmovecheck`, setting the vital-sign detection interval, changing the time
-format, reminder time-windows, whitelist commands, and blood-pressure
-calibration plus BP / SpO2 / heart-rate detection triggers.
+Same dispatcher, features still without a resolved opcode: `showTxt` (server
+pushes text to the screen), `setWorkMod`, "take photo immediately", server
+changing `skipmovecheck`, changing the time format, reminder time-windows,
+whitelist commands, and the BP / SpO2 / heart-rate detection triggers.
+
+Two that were on that list are no longer: the vital-sign detection interval is
+`BPSQ` and blood-pressure calibration is `BPJZ`, both below.
 
 ### Resolved by their downlink handlers
 
@@ -229,7 +241,7 @@ back. Authentication is that shared password over unauthenticated SMS.
 `factoryreset`, `location`, `maillog`, `poweroff`, `reboot`, `setlocation`,
 `status`, `wifictl`.
 
-**Undocumented (23):**
+**Undocumented (25):**
 
 | Command | Effect |
 |---|---|
@@ -240,6 +252,7 @@ back. Authentication is that shared password over unauthenticated SMS.
 | `#setfotasrv#=`, `#setlogsrv#=` | change firmware-update and log servers |
 | `#setprotocol#=` | switch protocol implementation; **reboots the device** |
 | `#usb#=` | USB mode (`mtp` / `none`) |
+| `#tp#=getver`, `#tp#=upgrade` | read or reflash the FT6236U touch-panel controller's firmware; the handler refuses anything but an A1-to-A3 upgrade |
 | `#logctl#=`, `#packagevers#`, `#showinfo#`, `#showui#`, `#testcmd#` | diagnostics, log upload |
 | `#fotaupdate#`, `#fotaupdatewifi#` | trigger firmware update |
 | `#reset#`, `#factoryresetchecksim#`, `#poweroffchecksim#` | reset / power-off variants |

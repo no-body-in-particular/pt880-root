@@ -6,7 +6,9 @@
   "active_protocol": {
     "name": "protocol_beehome",
     "persist.sys.protocol_no": 1,
-    "evidence": "build.prop in system.img; ICSmsManager.handleSMS_CMD maps jiai=0 beehome=1 ic=2 fzd=3 mqtt=4"
+    "evidence": "build.prop in system.img; ICSmsManager.handleSMS_CMD maps jiai=0 beehome=1 ic=2 fzd=3 mqtt=4",
+    "downlink_handlers": 45,
+    "handler_note": "53 is the CMD_TYPE enum. Only 45 downlink opcodes have a handleBP* method; BP10 BP21 BP49 BP92 BPH1 BPHT BPJK BPVR are enum entries with no handler, so the watch parses them and does nothing. Count handlers, not enum entries, when asking what the watch will act on."
   },
   "protocol_index_map": {
     "0": "jiai",
@@ -244,25 +246,23 @@
     "BP75": "set alarm clocks (writes content://com.ic.provider.alarm/alarm)",
     "BP85": "set alarm",
     "BPH1": "historical location upload",
-    "BPX1": "set HR / BP / SpO2 correction values"
+    "BPX1": "set HR / BP / SpO2 correction values",
+    "AP05/BP05": "voice messages waiting on the server ('the server has N voice messages not received')",
+    "AP07/BP07": "voice / media packet and its acknowledgement (SentVoicePacket, totalPackageCount, currentPackage); this, not BP42, advances an upload",
+    "AP68/BP68": "device binding / activation state ('bound successfully' / 'not activated or unbound')",
+    "AP87/BP87": "QR-code URL push; writes persist.sys.qrUriFile",
+    "AP89/BP89": "heart-rate / blood-pressure alarm thresholds",
+    "APHP/BPHP": "heart rate + blood pressure + SpO2 upload",
+    "APJZ/BPJZ": "blood-pressure calibration: BPH, BPL, Age, Sex per index. The earlier reading, 'blood pressure systolic and diastolic', took the BPH/BPL pair for a measurement; the Age and Sex fields alongside them and the dispatcher's own branch text make it the calibration command.",
+    "APOX/BPOX": "blood oxygen",
+    "APS4/BPS4": "alarm clocks, 1st through 7th",
+    "APTP/BPTP": "body temperature data",
+    "APU8/BPU8": "text-message tunnel; also carries the photo trigger '>*photo@1*<'",
+    "APTE/BPTE": "body-temperature measurement period, in minutes ('measure body temperature once every N minutes'). The handler misreports its own parse failure as 'BP89 format error!'",
+    "APSQ/BPSQ": "vital-sign sensor measurement period, in seconds, per sensor type: heart rate, blood pressure, body temperature, blood oxygen. Finer-grained than BP86, which sets only heart rate and blood pressure.",
+    "APTQ/BPTQ": "weather push: weather text, id, current / max / min temperature; broadcasts com.ic.action_weather_recveived"
   },
-  "unresolved": [
-    "AP89",
-    "APS4",
-    "APTP",
-    "APTE",
-    "APHP",
-    "AP05",
-    "AP07",
-    "AP21",
-    "AP68",
-    "AP87",
-    "AP92",
-    "APJZ",
-    "APOX",
-    "APSQ",
-    "APU8"
-  ],
+  "unresolved": [],
   "sms_channel": {
     "format": "<password>#<command>#",
     "documented": [
@@ -287,6 +287,7 @@
       "fotaupdatewifi",
       "getweather",
       "host",
+      "ip",
       "listen",
       "logctl",
       "monitor",
@@ -301,14 +302,31 @@
       "showui",
       "skipmovecheck",
       "testcmd",
+      "tp",
       "usb"
     ],
-    "observed": "<password>#reboot# -> 'do reboot ok!'"
+    "observed": "<password>#reboot# -> 'do reboot ok!'",
+    "total": 36,
+    "count_note": "36, not the 34 recorded earlier: #ip#= and #TP#= were missed. Both are handled in ICSmsManager.handleSMS_CMD like the rest."
   },
   "runtime_evidence_appops": {
     "RECORD_AUDIO": "no entry - microphone never used by this app",
     "CAMERA": "once, 532 days ago, 2.7s",
     "GPS/MONITOR_HIGH_POWER_LOCATION": "running",
     "WIFI_SCAN + NEIGHBORING_CELLS": "same cadence as GPS - WiFi/cell positioning also in use"
+  },
+  "unresolved_note": "Empty. The fifteen that were open resolved as: eleven from their handleBP* log strings, AP21 and AP92 as dead code with no caller, and APTE and APSQ from their handlers here. Resolved means the vendor's own description was recovered, not that the command was sent.",
+  "dead_code": {
+    "opcodes": [
+      "AP21",
+      "AP92",
+      "APH1"
+    ],
+    "uplink_halves_only": [
+      "AP87",
+      "APHP",
+      "APTP"
+    ],
+    "evidence": "builder and enum entry present, no caller anywhere in the application"
   }
 }

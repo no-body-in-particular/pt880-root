@@ -444,9 +444,11 @@ inventory in `protocol/opcodes.json`. Summary of what it settles:
   `protocol_beehome`, chosen by `persist.sys.protocol_no=1`.
 - Active protocol: 53 uplink + 53 downlink opcodes against 42 + 42 in the
   public Thinkrace V2.10 spec, so **21 pairs are undocumented**. Semantics for
-  most of them were recovered from the dispatcher's own log strings.
-- A separate **SMS control plane** (`<password>#<command>#`) carries 34
-  commands, 11 documented. The undocumented 23 include remote microphone,
+  all of them have now been recovered from the dispatcher's and the handlers'
+  own log strings. 53 is the enum: only **45** downlink opcodes have a handler,
+  and that is the number that decides what the watch will act on.
+- A separate **SMS control plane** (`<password>#<command>#`) carries 36
+  commands, 11 documented. The undocumented 25 include remote microphone,
   remote camera, arbitrary modem AT commands, and repointing the device at
   another server.
 

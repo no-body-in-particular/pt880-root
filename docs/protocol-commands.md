@@ -61,6 +61,19 @@ serial number, four adds one value, five adds two.
 `HOURS=` is the odd one: three fields and no serial number, which is what `handleBPTF`
 checks for and what the watch answers to.
 
+### Five of these the stock firmware never implemented
+
+`LANG=` (`BP20`), `PULSE#` (`BP50`), `CONTACT=` (`BP51`), `DELCONTACT=` (`BP52`)
+and `OXYGEN#` (`BPXZ`) come from the vendor's protocol document, not from this
+firmware. `protocol_beehome` has no `handleBP*` for any of them and its
+`CMD_TYPE` enum does not carry them, so `parserCmd` would have logged them as
+unsupported and done nothing. They are listed here because CTracker sends them
+and the launcher answers them, which is what makes them work today - not
+because the stock watch ever did.
+
+The "in use" column above means the server has been sending the command, not
+that a stock watch acted on it.
+
 **Every packet must end in `#`.** The older commands take that character from
 whatever the caller typed, so `UPDATE=600#` works and `UPDATE=600` goes out
 unterminated - the watch waits for an end of packet that never arrives and
@@ -208,7 +221,13 @@ so adb in recovery runs as root, but still over USB.
 `IWAPJK,...,2,61` - a pulse of 61. It does trigger a measurement.
 
 What it does not send is the `IWAP50,<serial>,1#` acknowledgement the protocol document
-describes. This firmware answers with the reading instead, which is worth knowing before
-somebody waits for an ack that is never coming and concludes the command failed. `IWBPXL`
-behaves the other way round: it acknowledges with `IWAPXL` and then may or may not measure,
-which is what made a second trigger worth having.
+describes. `IWBPXL` behaves the other way round: it acknowledges with `IWAPXL` and then may
+or may not measure, which is what made a second trigger worth having.
+
+**That reading was probably not an answer.** `BP50` has no handler in this firmware and is
+not in its `CMD_TYPE` enum, and the launcher that speaks the protocol now answers `50` with a
+position, not a pulse. Nothing on either side turns `BP50` into a heart-rate measurement. A
+watch on a three-minute vitals cycle produces an `IWAPJK` every three minutes whether or not
+anything was sent to it, so a pulse arriving twenty-two seconds later is the cycle, not a
+reply. The earlier reading of this - "it does trigger a measurement" - was one observation
+with no control, and it should not be relied on.
