@@ -349,6 +349,27 @@ because working it out took a day and the code that used it has been removed.
 `com.ic.work.SensorDataService` is declared `exported="true"` with **no
 permission**, so any app on the watch can bind it.
 
+**Binding it needs the right action, and the manifest does not have it.** An
+explicit component alone returns null from `onBind` while `bindService` still
+answers true, and so does the resolver table's
+`action.WORK_SERVICE_SECOND_TIMER` - that one starts its timer. `onBind`'s own
+constants have the real pair:
+
+    "on service bind package name -- > "  " action name is == > "
+    "com.ic.blood"   "com.ic.sensor.data.action.HEART_RATE"
+    "com.ic.temp"    "com.ic.sensor.data.action.TEMPERATURE"
+
+Two binders behind one service, chosen by action. With `HEART_RATE` the bind
+returns `com.ic.work.IHeartRateSensorService`, and a measurement actually starts.
+
+**And it is the only thing that starts one.** `gh30x_sensor` in the platform
+sensor list is a mirror: `registerListener` replays its cached triple at once,
+`requestTriggerSensor` returns without the HAL doing anything, and `dumpsys`
+shows `0 active connections` with a `last=` that does not move for hours. A
+client reading it directly gets the same frozen numbers for ever. Through the
+binder the sensor goes to `status: active`, the LED comes on, and the value
+changes.
+
 ```
 interface com.ic.work.IHeartRateSensorService
   1  registerCallback(IHeartRateSensorCallback, String pkg)   writes a reply
@@ -381,8 +402,12 @@ there is no timeout, and a measurement whose sensor callback never arrives holds
 the queue permanently. Both sensors stop within a minute of each other and stay
 stopped until the process restarts.
 
-That makes this interface useless as a recovery route. Asking it for a reading
-during a stall only queues another item behind the stuck one. The newer version
+That makes this interface useless as a *recovery* route - asking it for a reading
+during a stall only queues another item behind the stuck one - but it is the only
+route there is, because the platform sensor cannot start a measurement at all.
+So it is used, with a bounded wait, no retry after a failure, and a doubling
+backoff so a watch that is off the wrist stops asking rather than taking a turn
+on that queue every three minutes all night. The newer version
 of the interface has a `stopCurrentWork` that would be the escape hatch; the
 build on this watch does not implement it — the binder answers three
 transactions and that is not one of them.
