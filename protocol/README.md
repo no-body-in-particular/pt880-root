@@ -424,3 +424,137 @@ baksmali deodex -a 19 -d <framework-odexes> -o out ICL02WorkService.odex
 The `-a 19` is not optional. Without it roughly 1800 classes fail with
 truncated-instruction errors — including the ones that matter — and the result
 looks like a much smaller, much simpler app than it is.
+
+## 11. Where the vitals actually are
+
+Section 10 covers reaching the service. This is about what comes back, which is
+a separate problem and a longer one: three numbers, three different paths, and
+none of them the obvious one.
+
+| | source | why not the obvious place |
+|---|---|---|
+| heart rate | `/dev/input/event1`, or the service | the HAL delivers nothing when it wedges |
+| SpO2 | the service, or `/dev/input/event1` | the driver's copy often has not converged |
+| blood pressure | `libICJniUtils` only | not on the input device at all |
+
+### The HAL wedges rather than breaks
+
+During a measurement the framework shows the sensor activated and connected, and
+then sits there:
+
+    gh30x_sensor  handle=0x00000008, active-count=1, connections=1
+    gh30x_sensor | status: First flush pending | pending flush events 0
+    last=< 60.0,120.0, 79.0>     unchanged across 29 s and every sample taken
+
+"First flush pending" means the connection opened and no sample ever arrived.
+`last=` freezes at whatever it last held, which is why readings can be identical
+for hours and why the service reports `high/low/heart/oxygen` all zero: it is
+handed nothing, so it has nothing to report. **A reboot clears it**, and so
+usually does force-stopping `com.ic.work`. Worth trying both before concluding
+the hardware has failed.
+
+### The driver underneath is fine
+
+`/dev/input/event1` is `crwxrwxrwx`, so no root is needed. During a measurement
+it produces a value a second:
+
+    REL_RX  0x395c -> 57 bpm,  92 %     settling
+    REL_RX  0x3a50 -> 58 bpm,  80 %
+    REL_RX  0x3b64 -> 59 bpm, 100 %     converged
+
+Two bytes in one `REL_RX`: heart rate high, SpO2 low. `REL_RZ` is a once-a-second
+progress tick and carries no measurement. `REL_RY` is declared in
+`capabilities/rel` (0x38 = RX, RY, RZ) and **has never once been emitted**,
+including during the measurement that produced 123/81.
+
+Nothing in userspace can *start* a measurement: `goodix_health` exposes no sysfs
+control, there is no character device for it, and the i2c protocol is the
+vendor's. Registering a listener does switch the sensor on, but that alone runs
+no measurement — 45 s of it produced not one sample.
+
+### Blood pressure is derived above the driver
+
+Since it is on no axis, it comes from `libICJniUtils.so`, which reaches the chip
+through `/dev/gh_tools` rather than through the HAL:
+
+    Java_com_ic_jni_ICJniUtils_getHighBloodPressure
+    Java_com_ic_jni_ICJniUtils_getLowBloodPressure
+    "is wared %d , ppg %d , spo2 %d , bph %d , bpl %d"
+
+It links only libc, liblog, libm and libstdc++. The signatures are in the
+`method_ids` of `ICTemperatureTest.odex`, which declares the same class — all
+`static native`, all `int` except the temperature pair, which is doubles. The
+declarations must be in a class named exactly `com.ic.jni.ICJniUtils`: the
+library exports by name, with no `JNI_OnLoad` and no `RegisterNatives`.
+
+Computing it independently is not realistic. It needs the raw PPG waveform,
+which is not on the input device — `REL_RX` carries the already-derived bpm and
+percentage, not samples — and reaching the waveform means `ioctl` on
+`/dev/gh_tools`, so native code either way. Single-PPG pressure estimation is a
+calibrated per-subject model rather than a formula, and does not transfer between
+sensors.
+
+### The pressures only exist at the end of a measurement
+
+The pair arrives in the callback that *ends* a measurement. Before that the
+service reports what the algorithm has reached so far, and
+`getHighBloodPressure()` polled mid-run returns a number on its way somewhere.
+
+So a client timeout that fires early does not return slightly less — it returns
+the intermediate `onHeartRateUpdate` callbacks instead of the final
+`onHeartRateGet`, whose pressures are unsettled. Observed on a sleeping wrist,
+in two stages:
+
+    before   118/78  119/79  120/79  121/80  122/81  123/81     tight
+    after    103/68  106/70  110/73  117/77  124/82  127/84     ragged
+    then     nothing at all
+
+### How long a measurement runs
+
+Two independent stops in `BloodInfoHelper`, shorter one wins:
+
+    checkCount   > 10    readings delivered
+    noWearCount  > 20    roughly 20 s of the wear detector reading false
+
+Off the wrist the second fires first, so measurements end at ~21 s with
+`checkCount` still in single figures. Raising the reading limit is one 16-bit
+operand:
+
+    009f  iget-quick v0, offset 48      checkCount
+    00a1  const/16 v3, 10               <- the limit
+    00a3  if-gt v0, v3 -> stop
+
+It lengthens every measurement, so any client timeout has to keep up: twenty
+readings lands around 35-40 s, thirty runs 40-55 s.
+
+### SpO2 converges in two stages
+
+It climbs rather than arriving, and the first plateau looks like an answer:
+
+    22, 24, 80, 81, 81, 81, 82, 82, 96, 97, 97
+
+Five or six samples at 81-82, then a jump to the high nineties. A window ending
+inside the false plateau yields 81, which is a reading nobody took — and
+stability alone cannot tell them apart, because the false plateau is perfectly
+stable. A moving wrist also jitters where a resting one does not: at rest the
+tail reads `82, 82, 100, 100`, in a car `82, 93, 90, 91`.
+
+### Temperature is a wrist reading, not a body one
+
+A wrist sits a few degrees above the room and well below its owner, so the raw
+value reads like room temperature. `com.ic.work` converts in its own
+`onSensorChanged`:
+
+    iget-wide  offset 24              the wrist reading
+    invoke-static a(wrist, ambient)   -> getBodyTempFromWristTemp
+    iput-wide  offset 32              the body temperature
+
+with a constant 26.0 standing in for ambient whenever the measured one is
+unusable. The conversion leans on the difference between skin and surroundings,
+so without a real ambient reading it drifts in a cold room or outdoors.
+
+### Reproducing
+
+`tools/patch_ic_work.py` in the launcher repo locates each of these by the
+service's own log strings rather than by file offset, and refuses to write if
+the bytes are not what it expects.
