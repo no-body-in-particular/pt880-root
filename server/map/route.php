@@ -16,9 +16,17 @@
  *
  * Answers, big-endian:
  *
- *   "WRT1"  u32 metres  u16 steps  u16 points
- *   per step:  u8 turn  u16 metres  i32 lat  i32 lon      (x1e7)
- *   geometry:  i32 lat  i32 lon  then (i16,i16) x n-1     (deltas x1e6)
+ *   "WRT2"  u32 metres  u16 steps  u16 points
+ *   per step:  u8 turn  u8 exit  u16 metres  i32 lat  i32 lon      (x1e7)
+ *   geometry:  i32 lat  i32 lon  then (i16,i16) x n-1             (deltas x1e6)
+ *
+ * The exit byte is which exit to take at a roundabout, and 0 everywhere else. OSRM has always
+ * reported it and this threw it away, so the watch could only ever say "at the roundabout" -
+ * true, and not the part a driver needs. Counting exits is the whole instruction at a
+ * roundabout, and it is the one manoeuvre where the direction alone says nothing.
+ *
+ * WRT1 was the same without that byte. The watch still reads it, so a cached route written
+ * before this, or a server that has not been updated, keeps working and simply says less.
  */
 
 require_once __DIR__ . '/lib.php';
@@ -45,7 +53,10 @@ if (!$flat || !$flon || !$tlat || !$tlon) {
 
 @mkdir(CACHE_DIR, 0755, true);
 $key = sprintf('%.4f_%.4f_%.4f_%.4f', $flat, $flon, $tlat, $tlon);
-$cacheFile = CACHE_DIR . '/' . $key . '.bin';
+// The suffix is part of the format, not decoration: without it the day of cached WRT1 files
+// written before this change would keep being served, and the exits would appear tomorrow
+// rather than now.
+$cacheFile = CACHE_DIR . '/' . $key . '.v2.bin';
 
 // A route is only worth reusing while it is fresh; roads do not move but
 // a stale one hides a closure, and the file is a couple of kilobytes.
@@ -91,6 +102,11 @@ foreach (($route['legs'][0]['steps'] ?? []) as $s) {
     if (!$loc) { continue; }
     $steps[] = [
         'turn' => turn_code($m['type'] ?? '', $m['modifier'] ?? ''),
+        // OSRM puts the exit number on roundabout and rotary manoeuvres, counting from the
+        // entry. Taken whenever it is offered rather than only for the turn codes we mapped to
+        // TURN_ROUNDABOUT, because the two do not have to agree: a rotary that came through as
+        // a plain left is still a rotary, and the number is still right.
+        'exit' => max(0, min(255, (int) ($m['exit'] ?? 0))),
         'dist' => min(65535, (int) round($s['distance'] ?? 0)),
         'lat'  => $loc[1],
         'lon'  => $loc[0],
@@ -98,13 +114,14 @@ foreach (($route['legs'][0]['steps'] ?? []) as $s) {
     if (count($steps) >= 250) { break; }
 }
 
-$out = 'WRT1'
+$out = 'WRT2'
      . pack('N', (int) round($route['distance']))
      . pack('n', count($steps))
      . pack('n', min(65535, count($coords)));
 
 foreach ($steps as $s) {
     $out .= pack('C', $s['turn'])
+          . pack('C', $s['exit'])
           . pack('n', $s['dist'])
           . pack('N', enc32($s['lat']))
           . pack('N', enc32($s['lon']));
