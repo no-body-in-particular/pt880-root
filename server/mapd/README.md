@@ -109,3 +109,44 @@ URLs compiled in, and a rename would be a flag day for no benefit.
 
 A country need not be named: tile numbers are global, so `mapd` works out
 which database to render from by where the request is asking about.
+
+## TODO: WRT2, the roundabout exit
+
+`server/map/route.php` gained this on 30 August (`ca8dfb8`) and **mapd did not**,
+which means it is not live: hiawatha has `ReverseProxy = ^/map/ 0
+http://127.0.0.1:8088`, so every `/map/` request the watch makes is answered
+here, and the PHP is the fallback path that nothing currently uses. A route
+fetched from the running server today is still `WRT1`.
+
+That matters more than a missing feature, because the launcher half has landed
+too (`1e45ff0`, "Say which exit to take at a roundabout"). A watch that expects
+WRT2 against a server still sending WRT1 reads an 11 byte step as 12: the first
+step parses, and every step after it is garbage. The compatibility note on the
+PHP commit - "the watch still reads WRT1, so a server that has not been updated
+keeps working" - covers old watch against new server, not this direction. So the
+launcher build is deliberately not published until this is done.
+
+The change, in `src/route_encode.rs`:
+
+- The steps vector is `Vec<(u8, u16, f64, f64)>` at line 58; it needs an exit
+  byte: `Vec<(u8, u8, u16, f64, f64)>`.
+- The exit is already in hand. This parses OSRM's own JSON, so alongside
+  `maneuver.type` and `maneuver.modifier` there is `maneuver.exit` - read it as
+  `m.get("exit").and_then(|v| v.as_u64()).unwrap_or(0).min(255) as u8`.
+- Take it whenever OSRM offers it rather than only for the types that map to a
+  roundabout turn code. The PHP does the same, for the reason given there: a
+  rotary that came through as a plain left is still a rotary and the number is
+  still right.
+- `b"WRT1"` becomes `b"WRT2"` at line 92, the exit byte is pushed straight after
+  the turn byte in the loop at line 97, and the capacity hint at line 91 goes
+  from `steps.len() * 11` to `* 12`.
+- The module doc at the top of the file states the layout and should say
+  `u8 turn  u8 exit  u16 metres  i32 lat  i32 lon`.
+
+If mapd caches encoded routes anywhere, the key needs a version marker for the
+same reason the PHP added `.v2.bin` - otherwise yesterday's WRT1 files keep
+being served and the exits appear whenever the cache turns over.
+
+Deploy is `cargo build --release`, `install -m755 target/release/mapd
+/usr/local/bin/mapd`, `rc-service mapd restart`. Verify with a route fetch: the
+first four bytes should read WRT2, and the header is big-endian.
