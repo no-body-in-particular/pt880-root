@@ -38,13 +38,17 @@ wheel, so the amber route line the watch draws on top is unmistakable.
 
 ## Endpoints
 
+None any more. `mapd` answers every URL under `/map/` - hiawatha reverse-proxies
+the lot to it on localhost - so the PHP that used to serve `pack.php`,
+`tile.php`, `route.php`, `country.php` and `graph.php` was dead code kept in the
+tree, and `roads.php` was dead on both sides: mapd never implemented it and the
+watch never asked for it. See `../mapd/README.md` for what serves what now.
+
+The rendering itself did not go with them. It lives in `lib.php`, which is where
+`mapd` and the build tooling both reach it from.
+
 | | |
 |---|---|
-| `pack.php` | a 16x16 block of tiles in one response - what the watch actually uses |
-| `tile.php` | a single tile, for looking at one by hand |
-| `roads.php` | road vectors for a tile |
-| `route.php` | a route, proxied from the OSRM demo server and cached a day |
-| `country.php` | which country covers a position, and its bounds |
 
 ## Tools
 
@@ -56,7 +60,6 @@ wheel, so the amber route line the watch draws on top is unmistakable.
 | `import_buildings.php` | building footprints, as bounding boxes |
 | `import_lines.php` | railways and waterways |
 | `warm.php` / `warm.sh` | render a country ahead of time, sharded, yielding to live requests |
-| `convert.php` | repack an old per-tile cache into block files |
 
 ## Why blocks
 
