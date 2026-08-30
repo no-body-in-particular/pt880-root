@@ -429,7 +429,10 @@ pub fn route(app: &App, r: Request, q: &HashMap<String, String>) {
     }
 
     let key = format!("{:.5}_{:.5}_{:.5}_{:.5}", flat, flon, tlat, tlon);
-    let cached = app.tiles.join("routes").join(format!("{}.bin", key));
+    // The version is part of the name, not decoration: without it the day of WRT1 files already
+    // on disk would go on being served and the roundabout exits would appear tomorrow rather
+    // than now.
+    let cached = app.tiles.join("routes").join(format!("{}.v2.bin", key));
     if let Ok(md) = std::fs::metadata(&cached) {
         let fresh = md
             .modified()
